@@ -581,12 +581,17 @@ function TakvimScreen({ ogrenciler, dersler, setDersler }) {
                         <div style={{
                           background: C.orange, borderRadius: 6, padding: "3px 5px",
                           fontSize: 10, fontWeight: 700, color: C.white, height: "90%",
-                          overflow: "hidden",
+                          overflow: "hidden", position: "relative",
                         }}>
                           <div style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                             {lesson.ogrenciAd}
                           </div>
                           <div style={{ opacity: 0.85, fontSize: 9 }}>{lesson.saat}</div>
+                          <button onClick={() => dersSil(lesson.id)} style={{
+                            position: "absolute", top: 1, right: 1, background: "rgba(0,0,0,0.3)",
+                            border: "none", borderRadius: 3, cursor: "pointer", padding: "1px 3px",
+                            color: C.white, fontSize: 9, lineHeight: 1,
+                          }}>✕</button>
                         </div>
                       )}
                     </div>
@@ -791,12 +796,20 @@ function TakvimScreen({ ogrenciler, dersler, setDersler }) {
 function OdevlerScreen({ ogrenciler }) {
   const [tab, setTab] = useState("gondar");
   const [odevler, setOdevler] = useState([]);
+  const [kutuphane, setKutuphane] = useState([]);
   const [showAdd, setShowAdd] = useState(false);
+  const [showKutuphaneAdd, setShowKutuphaneAdd] = useState(false);
+  const [showTestAdd, setShowTestAdd] = useState(false);
   const [ogrId, setOgrId] = useState("");
   const [aciklama, setAciklama] = useState("");
-  const [teslim, setTeslim] = useState("yarin");
+  const [teslim, setTeslim] = useState("yarın gece");
   const [aiLoading, setAiLoading] = useState(false);
   const [aiSoru, setAiSoru] = useState("");
+  const [kutupAd, setKutupAd] = useState("");
+  const [kutupAciklama, setKutupAciklama] = useState("");
+  const [testKonu, setTestKonu] = useState("");
+  const [testSorular, setTestSorular] = useState([]);
+  const [testLoading, setTestLoading] = useState(false);
 
   async function aiOdevOlustur() {
     if (!aiSoru.trim()) return;
@@ -820,6 +833,31 @@ function OdevlerScreen({ ogrenciler }) {
     setAiLoading(false);
   }
 
+  async function aiTestOlustur() {
+    if (!testKonu.trim()) return;
+    setTestLoading(true);
+    try {
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: "claude-sonnet-4-6",
+          max_tokens: 2000,
+          messages: [{
+            role: "user",
+            content: `${testKonu} konusunda 5 adet çoktan seçmeli soru oluştur. Sadece JSON formatında döndür, başka hiçbir şey yazma:
+[{"soru": "soru metni", "secenekler": ["A) ...", "B) ...", "C) ...", "D) ..."], "cevap": "A"}]`,
+          }]
+        })
+      });
+      const data = await res.json();
+      const text = data.content[0].text.replace(/\`\`\`json|\`\`\`/g, "").trim();
+      const parsed = JSON.parse(text);
+      setTestSorular(parsed);
+    } catch (e) { alert("Test oluşturulamadı."); }
+    setTestLoading(false);
+  }
+
   function odevEkle() {
     if (!aciklama.trim()) return;
     const o = ogrenciler.find(o => String(o.id) === ogrId);
@@ -829,6 +867,32 @@ function OdevlerScreen({ ogrenciler }) {
       tarih: new Date().toLocaleDateString("tr-TR"),
     }]);
     setShowAdd(false); setAciklama(""); setOgrId(""); setAiSoru("");
+  }
+
+  function klasikOdevKaydet() {
+    if (!kutupAd.trim()) return;
+    setKutuphane(prev => [...prev, {
+      id: Date.now(), ad: kutupAd, aciklama: kutupAciklama,
+      tip: "klasik", tarih: new Date().toLocaleDateString("tr-TR"),
+    }]);
+    setShowKutuphaneAdd(false); setKutupAd(""); setKutupAciklama("");
+  }
+
+  function testKaydet() {
+    if (!testSorular.length) return;
+    setKutuphane(prev => [...prev, {
+      id: Date.now(), ad: testKonu, sorular: testSorular,
+      tip: "test", tarih: new Date().toLocaleDateString("tr-TR"),
+    }]);
+    setShowTestAdd(false); setTestKonu(""); setTestSorular([]);
+  }
+
+  function kutuphaneSil(id) {
+    setKutuphane(prev => prev.filter(k => k.id !== id));
+  }
+
+  function odevSil(id) {
+    setOdevler(prev => prev.filter(o => o.id !== id));
   }
 
   const durumRenk = { bekliyor: C.orange, "teslim edildi": C.green, gecikmiş: C.red, değerlendirildi: C.blue };
@@ -851,32 +915,143 @@ function OdevlerScreen({ ogrenciler }) {
         }}>📚 Kütüphane</button>
       </div>
 
-      {odevler.length === 0 ? (
-        <Card style={{ textAlign: "center", padding: "40px 20px" }}>
-          <div style={{ fontSize: 48, marginBottom: 12 }}>📋</div>
-          <div style={{ fontSize: 17, fontWeight: 700, marginBottom: 6 }}>Henüz ödev verilmemiş</div>
-          <div style={{ fontSize: 13, color: C.gray, marginBottom: 20 }}>Öğrencilerinize ödev atayarak takip etmeye başlayın</div>
-          <Btn onClick={() => setShowAdd(true)} style={{ margin: "0 auto" }}>
-            <Icon name="plus" size={16} color={C.white} /> Ödev Ver
-          </Btn>
-        </Card>
-      ) : (
-        odevler.map(o => (
-          <Card key={o.id} style={{ marginBottom: 10 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontWeight: 700, fontSize: 14 }}>{o.ogrenciAd}</div>
-                <div style={{ fontSize: 13, color: C.gray, marginTop: 4 }}>{o.aciklama}</div>
-                <div style={{ fontSize: 11, color: C.gray, marginTop: 6 }}>Teslim: {o.teslim} · {o.tarih}</div>
-              </div>
-              <span style={{
-                fontSize: 11, fontWeight: 700, padding: "4px 8px", borderRadius: 8,
-                background: (durumRenk[o.durum] || C.gray) + "22",
-                color: durumRenk[o.durum] || C.gray, textTransform: "capitalize",
-              }}>{o.durum}</span>
+      {tab === "gondar" && (
+        <>
+          {odevler.length === 0 ? (
+            <Card style={{ textAlign: "center", padding: "40px 20px" }}>
+              <div style={{ fontSize: 48, marginBottom: 12 }}>📋</div>
+              <div style={{ fontSize: 17, fontWeight: 700, marginBottom: 6 }}>Henüz ödev verilmemiş</div>
+              <div style={{ fontSize: 13, color: C.gray, marginBottom: 20 }}>Öğrencilerinize ödev atayarak takip etmeye başlayın</div>
+              <Btn onClick={() => setShowAdd(true)} style={{ margin: "0 auto" }}>
+                <Icon name="plus" size={16} color={C.white} /> Ödev Ver
+              </Btn>
+            </Card>
+          ) : (
+            odevler.map(o => (
+              <Card key={o.id} style={{ marginBottom: 10 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontWeight: 700, fontSize: 14 }}>{o.ogrenciAd}</div>
+                    <div style={{ fontSize: 13, color: C.gray, marginTop: 4 }}>{o.aciklama}</div>
+                    <div style={{ fontSize: 11, color: C.gray, marginTop: 6 }}>Teslim: {o.teslim} · {o.tarih}</div>
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <span style={{
+                      fontSize: 11, fontWeight: 700, padding: "4px 8px", borderRadius: 8,
+                      background: (durumRenk[o.durum] || C.gray) + "22",
+                      color: durumRenk[o.durum] || C.gray, textTransform: "capitalize",
+                    }}>{o.durum}</span>
+                    <button onClick={() => odevSil(o.id)} style={{ background: "none", border: "none", cursor: "pointer", padding: 4 }}>
+                      <Icon name="trash" size={14} color={C.red} />
+                    </button>
+                  </div>
+                </div>
+              </Card>
+            ))
+          )}
+        </>
+      )}
+
+      {tab === "kutuphane" && (
+        <>
+          {/* Arama + ekle butonu */}
+          <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+            <input placeholder="Ara..." style={{
+              flex: 1, padding: "10px 14px", borderRadius: 12,
+              border: `1.5px solid ${C.grayLight}`, fontSize: 14, outline: "none",
+            }} />
+            <div style={{ position: "relative" }}>
+              <Btn small onClick={() => setShowKutuphaneAdd(v => !v)}>
+                <Icon name="plus" size={14} color={C.white} /> Kütüphaneye Ekle
+              </Btn>
+              {showKutuphaneAdd && (
+                <div style={{
+                  position: "absolute", right: 0, top: 44, background: C.white, borderRadius: 14,
+                  boxShadow: "0 4px 20px rgba(0,0,0,0.15)", zIndex: 200, minWidth: 200, overflow: "hidden",
+                }}>
+                  <button onClick={() => { setShowKutuphaneAdd(false); setShowKutuphaneAdd(false); setKutupAd(""); setKutupAciklama(""); setTimeout(() => document.getElementById("klasik-modal")?.click(), 100); }} style={{
+                    display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "14px 18px",
+                    border: "none", background: C.white, cursor: "pointer", fontSize: 14,
+                  }} onClick={() => { setShowKutuphaneAdd(false); setShowAdd(true); }}>
+                    <span>📄</span>
+                    <div style={{ textAlign: "left" }}>
+                      <div style={{ fontWeight: 700 }}>Klasik Ödev</div>
+                      <div style={{ fontSize: 12, color: C.gray }}>PDF, fotoğraf veya yazılı ödev kaydet</div>
+                    </div>
+                  </button>
+                  <div style={{ height: 1, background: C.grayLight }} />
+                  <button onClick={() => { setShowKutuphaneAdd(false); setShowTestAdd(true); }} style={{
+                    display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "14px 18px",
+                    border: "none", background: C.white, cursor: "pointer", fontSize: 14,
+                  }}>
+                    <span>✅</span>
+                    <div style={{ textAlign: "left" }}>
+                      <div style={{ fontWeight: 700 }}>Optik Test</div>
+                      <div style={{ fontSize: 12, color: C.gray }}>Çoktan seçmeli, AI ile oluştur</div>
+                    </div>
+                  </button>
+                </div>
+              )}
             </div>
-          </Card>
-        ))
+          </div>
+
+          {kutuphane.length === 0 ? (
+            <Card style={{ textAlign: "center", padding: "40px 20px" }}>
+              <div style={{ fontSize: 48, marginBottom: 12 }}>📚</div>
+              <div style={{ fontSize: 17, fontWeight: 700, marginBottom: 6 }}>Kütüphanen henüz boş</div>
+              <div style={{ fontSize: 13, color: C.gray, marginBottom: 20 }}>Kaydettiğin ödevler ve testler burada toplanır</div>
+              <div style={{ display: "flex", gap: 10, justifyContent: "center", flexWrap: "wrap" }}>
+                <Btn onClick={() => setShowTestAdd(true)}>
+                  <Icon name="plus" size={16} color={C.white} /> İlk Testini Oluştur
+                </Btn>
+                <Btn variant="secondary" onClick={() => setShowAdd(true)}>
+                  📄 Klasik Ödev Ekle
+                </Btn>
+              </div>
+            </Card>
+          ) : (
+            kutuphane.map(k => (
+              <Card key={k.id} style={{ marginBottom: 10 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <span style={{ fontSize: 18 }}>{k.tip === "test" ? "✅" : "📄"}</span>
+                      <span style={{ fontWeight: 700, fontSize: 15 }}>{k.ad}</span>
+                    </div>
+                    {k.aciklama && <div style={{ fontSize: 13, color: C.gray, marginTop: 4 }}>{k.aciklama}</div>}
+                    {k.sorular && <div style={{ fontSize: 12, color: C.gray, marginTop: 4 }}>{k.sorular.length} soru · {k.tarih}</div>}
+                    {!k.sorular && <div style={{ fontSize: 12, color: C.gray, marginTop: 4 }}>{k.tarih}</div>}
+                  </div>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <Btn small variant="outline" onClick={() => {
+                      setAciklama(k.aciklama || k.ad); setShowAdd(true);
+                    }}>Gönder</Btn>
+                    <button onClick={() => kutuphaneSil(k.id)} style={{ background: "none", border: "none", cursor: "pointer", padding: 4 }}>
+                      <Icon name="trash" size={14} color={C.red} />
+                    </button>
+                  </div>
+                </div>
+                {/* Test sorularını göster */}
+                {k.sorular && (
+                  <div style={{ marginTop: 12 }}>
+                    {k.sorular.map((s, i) => (
+                      <div key={i} style={{ background: C.bg, borderRadius: 10, padding: 10, marginBottom: 6 }}>
+                        <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 6 }}>{i+1}. {s.soru}</div>
+                        {s.secenekler.map((sec, j) => (
+                          <div key={j} style={{
+                            fontSize: 12, padding: "3px 0",
+                            color: sec.startsWith(s.cevap) ? C.green : C.dark,
+                            fontWeight: sec.startsWith(s.cevap) ? 700 : 400,
+                          }}>{sec}</div>
+                        ))}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </Card>
+            ))
+          )}
+        </>
       )}
 
       <button onClick={() => setShowAdd(true)} style={{
@@ -888,6 +1063,7 @@ function OdevlerScreen({ ogrenciler }) {
         <Icon name="plus" size={24} color={C.white} />
       </button>
 
+      {/* Ödev Ver Modal */}
       {showAdd && (
         <Modal onClose={() => setShowAdd(false)} title="Ödev Ver">
           <Select label="Öğrenci Seçiniz" value={ogrId} onChange={setOgrId}
@@ -929,6 +1105,48 @@ function OdevlerScreen({ ogrenciler }) {
           <Btn onClick={odevEkle} style={{ width: "100%" }} disabled={!aciklama.trim()}>
             <Icon name="send" size={16} color={C.white} /> Ödev Ver
           </Btn>
+        </Modal>
+      )}
+
+      {/* AI Test Oluştur Modal */}
+      {showTestAdd && (
+        <Modal onClose={() => setShowTestAdd(false)} title="AI ile Test Oluştur">
+          <div style={{ background: C.orangeLight, borderRadius: 12, padding: 14, marginBottom: 16 }}>
+            <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}>
+              <Icon name="sparkle" size={16} color={C.orange} /> AI Test Üreticisi
+            </div>
+            <div style={{ fontSize: 13, color: C.gray, marginBottom: 10 }}>Konu ve sınıf seviyesini yazın, AI 5 soru oluştursun</div>
+            <input value={testKonu} onChange={e => setTestKonu(e.target.value)}
+              placeholder="Örn: 10. sınıf kimya mol hesabı"
+              style={{
+                width: "100%", padding: "10px 12px", borderRadius: 10,
+                border: `1.5px solid ${C.grayLight}`, fontSize: 14, boxSizing: "border-box",
+              }} />
+            <Btn onClick={aiTestOlustur} disabled={testLoading || !testKonu.trim()} style={{ marginTop: 10, width: "100%" }}>
+              {testLoading ? "⏳ Oluşturuluyor..." : <><Icon name="sparkle" size={16} color={C.white} /> Test Oluştur</>}
+            </Btn>
+          </div>
+
+          {testSorular.length > 0 && (
+            <>
+              <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 10 }}>✅ {testSorular.length} Soru Oluşturuldu</div>
+              {testSorular.map((s, i) => (
+                <div key={i} style={{ background: C.bg, borderRadius: 10, padding: 10, marginBottom: 8 }}>
+                  <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 6 }}>{i+1}. {s.soru}</div>
+                  {s.secenekler.map((sec, j) => (
+                    <div key={j} style={{
+                      fontSize: 12, padding: "3px 0",
+                      color: sec.startsWith(s.cevap) ? C.green : C.dark,
+                      fontWeight: sec.startsWith(s.cevap) ? 700 : 400,
+                    }}>{sec} {sec.startsWith(s.cevap) ? "✓" : ""}</div>
+                  ))}
+                </div>
+              ))}
+              <Btn onClick={testKaydet} style={{ width: "100%", marginTop: 8 }}>
+                <Icon name="book" size={16} color={C.white} /> Kütüphaneye Kaydet
+              </Btn>
+            </>
+          )}
         </Modal>
       )}
     </div>
