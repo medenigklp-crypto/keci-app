@@ -1,0 +1,15 @@
+{
+  "name": "Keçi",
+  "short_name": "Keçi",
+  "icons": [
+    {
+      "src": "/icon.png",
+      "sizes": "180x180",
+      "type": "image/png"
+    }
+  ],
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#F2F2F7",
+  "theme_color": "#E8820C"
+}
