@@ -251,15 +251,32 @@ const SUPABASE_KEY = "sb_publishable_E791sAyC_jiVkRwAP7-sjQ_k3G_GzDi";
 
 const EMPTY = { students: [], lessons: [], homework: [], library: [], payments: [] };
 
+const PAY_PERIODS = ["Her hafta", "2 haftada bir", "4 haftada bir", "5 haftada bir", "Aylık"];
+
 /** Uygulama alan adları ↔ veritabanı sütun adları */
 const TABLES = {
   students: {
-    toDb: (s) => ({ id: s.id, name: s.name, grade: s.grade, fee: s.fee, duration: s.duration, active: s.active }),
-    fromDb: (r) => ({ id: r.id, name: r.name, grade: r.grade || "", fee: Number(r.fee) || 0, duration: r.duration, active: r.active }),
+    toDb: (s) => ({
+      id: s.id, name: s.name, grade: s.grade, fee: s.fee,
+      duration: s.duration, active: s.active, pay_period: s.payPeriod,
+    }),
+    fromDb: (r) => ({
+      id: r.id, name: r.name, grade: r.grade || "", fee: Number(r.fee) || 0,
+      duration: r.duration, active: r.active,
+      payPeriod: r.pay_period || "Her hafta",
+    }),
   },
   lessons: {
-    toDb: (l) => ({ id: l.id, student_id: l.studentId, date: l.date, time: l.time, duration: l.duration, fee: l.fee, status: l.status }),
-    fromDb: (r) => ({ id: r.id, studentId: r.student_id, date: r.date, time: r.time, duration: r.duration, fee: Number(r.fee) || 0, status: r.status }),
+    toDb: (l) => ({
+      id: l.id, student_id: l.studentId, date: l.date, time: l.time,
+      duration: l.duration, fee: l.fee, status: l.status,
+      topic: l.topic || "", note: l.note || "",
+    }),
+    fromDb: (r) => ({
+      id: r.id, studentId: r.student_id, date: r.date, time: r.time,
+      duration: r.duration, fee: Number(r.fee) || 0, status: r.status,
+      topic: r.topic || "", note: r.note || "",
+    }),
   },
   homework: {
     toDb: (h) => ({ id: h.id, student_id: h.studentId || null, text: h.text, due: h.due, status: h.status }),
@@ -768,6 +785,7 @@ function StudentForm({ initial, onSave, onClose, toast }) {
   const [grade, setGrade] = useState(initial?.grade || "");
   const [fee, setFee] = useState(String(initial?.fee ?? ""));
   const [duration, setDuration] = useState(initial?.duration || "90 dk");
+  const [payPeriod, setPayPeriod] = useState(initial?.payPeriod || "Her hafta");
   const [aiText, setAiText] = useState("");
   const [aiOpen, setAiOpen] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -884,6 +902,10 @@ function StudentForm({ initial, onSave, onClose, toast }) {
         <TextInput value={fee} onChange={setFee} type="number" inputMode="numeric" placeholder="2500" />
       </Field>
 
+      <Field label="Ödeme dönemi" hint="Veli ne sıklıkla ödeme yapıyor?">
+        <Chips options={PAY_PERIODS} value={payPeriod} onChange={setPayPeriod} />
+      </Field>
+
       {rate > 0 && (
         <div style={{
           background: T.brandSoft, borderRadius: 11, padding: "11px 13px", marginBottom: 18,
@@ -905,9 +927,157 @@ function StudentForm({ initial, onSave, onClose, toast }) {
       <Button
         full
         disabled={!valid}
-        onClick={() => onSave({ name: name.trim(), grade, fee: rate, duration })}
+        onClick={() => onSave({ name: name.trim(), grade, fee: rate, duration, payPeriod })}
       >
         <Check size={17} /> {initial ? "Değişiklikleri kaydet" : "Öğrenciyi ekle"}
+      </Button>
+    </Sheet>
+  );
+}
+
+/** Bir öğrencinin tüm ders geçmişi — hangi tarih, hangi konu, hangi not */
+function HistorySheet({ student, lessons, onClose, onEditTopic }) {
+  const [q, setQ] = useState("");
+
+  const mine = useMemo(() => {
+    const term = q.trim().toLocaleLowerCase("tr");
+    return lessons
+      .filter((l) => l.studentId === student.id)
+      .filter((l) => !term || (l.topic || "").toLocaleLowerCase("tr").includes(term)
+                          || (l.note || "").toLocaleLowerCase("tr").includes(term))
+      .sort((a, b) => (b.date + b.time).localeCompare(a.date + a.time));
+  }, [lessons, student.id, q]);
+
+  const done = mine.filter((l) => l.status === "done");
+  const totalUnits = done.reduce((a, l) => a + unitsOf(l.duration), 0);
+
+  return (
+    <Sheet title={`${student.name} — ders geçmişi`} onClose={onClose}>
+      <div style={{
+        display: "flex", gap: 8, marginBottom: 14,
+      }}>
+        <div style={{ flex: 1, background: T.bg, borderRadius: 10, padding: "9px 11px" }}>
+          <div style={{ fontSize: 11, color: T.ink60 }}>Yapılan ders</div>
+          <div style={{ fontSize: 17, fontWeight: 750, fontVariantNumeric: "tabular-nums" }}>
+            {done.length}
+          </div>
+        </div>
+        <div style={{ flex: 1, background: T.bg, borderRadius: 10, padding: "9px 11px" }}>
+          <div style={{ fontSize: 11, color: T.ink60 }}>Ders saati</div>
+          <div style={{ fontSize: 17, fontWeight: 750, fontVariantNumeric: "tabular-nums" }}>
+            {totalUnits}
+          </div>
+        </div>
+        <div style={{ flex: 1, background: T.bg, borderRadius: 10, padding: "9px 11px" }}>
+          <div style={{ fontSize: 11, color: T.ink60 }}>Hakediş</div>
+          <div style={{ fontSize: 17, fontWeight: 750, fontVariantNumeric: "tabular-nums" }}>
+            {money(done.reduce((a, l) => a + l.fee, 0))}
+          </div>
+        </div>
+      </div>
+
+      {lessons.some((l) => l.studentId === student.id) && (
+        <div style={{ position: "relative", marginBottom: 14 }}>
+          <Search size={16} color={T.ink30} style={{ position: "absolute", left: 11, top: 12 }} />
+          <input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Konuda ara — örn. türev"
+            aria-label="Konuda ara"
+            className="k-input"
+            style={{ ...inputStyle, paddingLeft: 36 }}
+          />
+        </div>
+      )}
+
+      {mine.length === 0 ? (
+        <p style={{ textAlign: "center", color: T.ink60, fontSize: 13.5, padding: "28px 0" }}>
+          {q ? `“${q}” ile eşleşen ders yok.` : "Henüz ders kaydı yok."}
+        </p>
+      ) : (
+        <div style={{ display: "grid", gap: 8 }}>
+          {mine.map((l) => (
+            <div
+              key={l.id}
+              style={{
+                border: `1px solid ${T.line}`, borderRadius: 12, padding: 12,
+                borderLeft: `3px solid ${STATUS[l.status].fg}`,
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 5 }}>
+                <span style={{
+                  fontSize: 13, fontWeight: 700, fontVariantNumeric: "tabular-nums",
+                }}>
+                  {fmtDate(l.date)} · {span(l.time, l.duration)}
+                </span>
+                <span style={{
+                  fontSize: 10.5, fontWeight: 700, color: STATUS[l.status].fg,
+                  background: STATUS[l.status].bg, padding: "2px 7px", borderRadius: 6,
+                  marginLeft: "auto",
+                }}>
+                  {STATUS[l.status].label}
+                </span>
+              </div>
+
+              {l.topic ? (
+                <div style={{ fontSize: 14, fontWeight: 650, color: T.ink, marginBottom: 3 }}>
+                  {l.topic}
+                </div>
+              ) : (
+                <div style={{ fontSize: 13, color: T.ink30, fontStyle: "italic", marginBottom: 3 }}>
+                  Konu girilmemiş
+                </div>
+              )}
+
+              {l.note && (
+                <p style={{ margin: "0 0 6px", fontSize: 12.5, color: T.ink60, lineHeight: 1.45 }}>
+                  {l.note}
+                </p>
+              )}
+
+              <Button size="sm" variant="quiet" onClick={() => onEditTopic(l)}>
+                <BookOpen size={13} /> {l.topic ? "Konuyu düzenle" : "Konu ekle"}
+              </Button>
+            </div>
+          ))}
+        </div>
+      )}
+    </Sheet>
+  );
+}
+
+/** Bir dersin konusu ve notu */
+function TopicForm({ lesson, studentName, onSave, onClose }) {
+  const [topic, setTopic] = useState(lesson.topic || "");
+  const [note, setNote] = useState(lesson.note || "");
+
+  return (
+    <Sheet title="Ders konusu" onClose={onClose}>
+      <p style={{ margin: "-6px 0 16px", fontSize: 13.5, color: T.ink60 }}>
+        {studentName} · {fmtDate(lesson.date)} · {span(lesson.time, lesson.duration)}
+      </p>
+
+      <Field label="İşlenen konu">
+        <TextInput
+          value={topic}
+          onChange={setTopic}
+          placeholder="Türev — zincir kuralı"
+        />
+      </Field>
+
+      <Field label="Not" hint="Öğrencinin durumu, eksikleri, verilen ödev…">
+        <textarea
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+          rows={4}
+          placeholder="Zincir kuralında zorlandı, tekrar edilecek."
+          className="k-input"
+          style={{ ...inputStyle, resize: "vertical", lineHeight: 1.5 }}
+        />
+      </Field>
+
+      <Button full onClick={() => onSave({ topic: topic.trim(), note: note.trim() })}>
+        <Check size={17} /> Kaydet
       </Button>
     </Sheet>
   );
@@ -917,6 +1087,8 @@ function StudentsScreen({ data, update, toast, go }) {
   const [form, setForm] = useState(null); // null | "new" | student
   const [q, setQ] = useState("");
   const [pendingDelete, setPendingDelete] = useState(null);
+  const [history, setHistory] = useState(null);   // geçmişi açık öğrenci
+  const [topicOf, setTopicOf] = useState(null);   // konusu düzenlenen ders
 
   const list = useMemo(() => {
     const term = q.trim().toLocaleLowerCase("tr");
@@ -933,7 +1105,6 @@ function StudentsScreen({ data, update, toast, go }) {
     }
     setForm(null);
   }
-
   function remove(id) {
     const s = data.students.find((x) => x.id === id);
     update("students", (xs) => xs.filter((x) => x.id !== id));
@@ -989,7 +1160,10 @@ function StudentsScreen({ data, update, toast, go }) {
                     )}
                   </div>
                   <div style={{ fontSize: 13, color: T.ink60, marginTop: 4, fontVariantNumeric: "tabular-nums" }}>
-                    {durationLabel(s.duration)} · {money(s.fee)}/ders saati · {lessonCount(s.id)} ders planlı
+                    {durationLabel(s.duration)} · {money(s.fee)}/ders saati
+                  </div>
+                  <div style={{ fontSize: 12, color: T.ink30, marginTop: 3 }}>
+                    Ödeme: {s.payPeriod || "Her hafta"} · {lessonCount(s.id)} ders planlı
                   </div>
                 </div>
                 <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
@@ -1007,8 +1181,14 @@ function StudentsScreen({ data, update, toast, go }) {
                   </button>
                 </div>
               </div>
-              <div style={{ marginTop: 11, paddingTop: 11, borderTop: `1px solid ${T.line}` }}>
-                <Button size="sm" variant="outline" onClick={() => go("takvim")}>
+              <div style={{
+                marginTop: 11, paddingTop: 11, borderTop: `1px solid ${T.line}`,
+                display: "flex", gap: 7,
+              }}>
+                <Button size="sm" variant="outline" onClick={() => setHistory(s)}>
+                  <BookOpen size={14} /> Geçmiş
+                </Button>
+                <Button size="sm" variant="quiet" onClick={() => go("takvim")}>
                   <Calendar size={14} /> Ders planla
                 </Button>
               </div>
@@ -1038,6 +1218,28 @@ function StudentsScreen({ data, update, toast, go }) {
           onSave={save}
           onClose={() => setForm(null)}
           toast={toast}
+        />
+      )}
+      {history && (
+        <HistorySheet
+          student={history}
+          lessons={data.lessons}
+          onClose={() => setHistory(null)}
+          onEditTopic={(l) => setTopicOf(l)}
+        />
+      )}
+      {topicOf && (
+        <TopicForm
+          lesson={topicOf}
+          studentName={data.students.find((s) => s.id === topicOf.studentId)?.name || ""}
+          onClose={() => setTopicOf(null)}
+          onSave={({ topic, note }) => {
+            update("lessons", (xs) =>
+              xs.map((l) => (l.id === topicOf.id ? { ...l, topic, note } : l))
+            );
+            setTopicOf(null);
+            toast("Konu kaydedildi.");
+          }}
         />
       )}
       {pendingDelete && (
@@ -1257,6 +1459,7 @@ function CalendarScreen({ data, update, toast, go }) {
   const [view, setView] = useState("day");
   const [form, setForm] = useState(null);        // { date, hour }
   const [pendingDelete, setPendingDelete] = useState(null);
+  const [topicOf, setTopicOf] = useState(null);  // konusu girilen ders
 
   const weekStart = useMemo(() => startOfWeek(anchor), [anchor]);
   const week = useMemo(() => Array.from({ length: 7 }, (_, i) => addDays(weekStart, i)), [weekStart]);
@@ -1287,9 +1490,13 @@ function CalendarScreen({ data, update, toast, go }) {
   }
 
   function cycleStatus(id) {
+    const l = data.lessons.find((x) => x.id === id);
+    const next = NEXT_STATUS[l.status];
     update("lessons", (xs) =>
-      xs.map((l) => (l.id === id ? { ...l, status: NEXT_STATUS[l.status] } : l))
+      xs.map((x) => (x.id === id ? { ...x, status: next } : x))
     );
+    // "yapıldı" işaretlendiğinde ve konu boşsa konuyu sor
+    if (next === "done" && !l.topic) setTopicOf({ ...l, status: next });
   }
 
   function removeLesson(id) {
@@ -1450,6 +1657,14 @@ function CalendarScreen({ data, update, toast, go }) {
                           <div style={{ fontSize: 12, color: T.ink60, marginTop: 2, fontVariantNumeric: "tabular-nums" }}>
                             {span(l.time, l.duration)} · {money(l.fee)}
                           </div>
+                          {l.topic && (
+                            <div style={{
+                              fontSize: 12, color: T.ink, marginTop: 3, fontWeight: 600,
+                              display: "flex", alignItems: "center", gap: 4,
+                            }}>
+                              <BookOpen size={11} color={T.ink60} /> {l.topic}
+                            </div>
+                          )}
                         </button>
                         <span style={{
                           fontSize: 10.5, fontWeight: 700, color: STATUS[l.status].fg,
@@ -1580,6 +1795,20 @@ function CalendarScreen({ data, update, toast, go }) {
           hour={form.hour}
           onSave={addLessons}
           onClose={() => setForm(null)}
+        />
+      )}
+      {topicOf && (
+        <TopicForm
+          lesson={topicOf}
+          studentName={nameOf(topicOf.studentId)}
+          onClose={() => setTopicOf(null)}
+          onSave={({ topic, note }) => {
+            update("lessons", (xs) =>
+              xs.map((l) => (l.id === topicOf.id ? { ...l, topic, note } : l))
+            );
+            setTopicOf(null);
+            toast("Konu kaydedildi.");
+          }}
         />
       )}
       {pendingDelete && (
@@ -2026,15 +2255,20 @@ function HomeworkScreen({ data, update, toast, go }) {
    FİNANS
    ═══════════════════════════════════════════════════════════════ */
 
-function PaymentForm({ students, onSave, onClose }) {
-  const [studentId, setStudentId] = useState(students[0]?.id || "");
-  const [amount, setAmount] = useState("");
+function PaymentForm({ students, preselect, suggested, onSave, onClose }) {
+  const [studentId, setStudentId] = useState(preselect || students[0]?.id || "");
+  const [amount, setAmount] = useState(suggested ? String(suggested) : "");
   const [note, setNote] = useState("");
   const [date, setDate] = useState(iso(new Date()));
 
+  const student = students.find((s) => s.id === studentId);
+
   return (
     <Sheet title="Ödeme kaydet" onClose={onClose}>
-      <Field label="Öğrenci">
+      <Field
+        label="Öğrenci"
+        hint={student ? `Ödeme dönemi: ${student.payPeriod || "Her hafta"}` : undefined}
+      >
         <Picker
           value={studentId}
           onChange={setStudentId}
@@ -2101,6 +2335,20 @@ function FinanceScreen({ data, update, toast, go }) {
 
   const sorted = [...data.payments].sort((a, b) => b.date.localeCompare(a.date));
 
+  // her öğrenci için: yapılan derslerin toplamı − ödediği toplam
+  const balances = data.students
+    .map((s) => {
+      const earnedAll = data.lessons
+        .filter((l) => l.studentId === s.id && l.status === "done")
+        .reduce((a, l) => a + l.fee, 0);
+      const paidAll = data.payments
+        .filter((p) => p.studentId === s.id)
+        .reduce((a, p) => a + p.amount, 0);
+      return { student: s, debt: earnedAll - paidAll };
+    })
+    .filter((b) => b.debt > 0)
+    .sort((a, b) => b.debt - a.debt);
+
   if (data.students.length === 0) {
     return (
       <div style={{ padding: "0 16px" }}>
@@ -2159,6 +2407,38 @@ function FinanceScreen({ data, update, toast, go }) {
           tone="#9C36B5"
         />
       </div>
+
+      {balances.length > 0 && (
+        <>
+          <h2 style={{
+            fontSize: 15, fontWeight: 700, margin: "0 0 10px",
+            borderLeft: `3px solid ${T.warn}`, paddingLeft: 9,
+          }}>
+            Bekleyen ödemeler
+          </h2>
+          <div style={{ display: "grid", gap: 7, marginBottom: 20 }}>
+            {balances.map(({ student, debt }) => (
+              <Card key={student.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 13px" }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontWeight: 650, fontSize: 14 }}>{student.name}</div>
+                  <div style={{ fontSize: 12, color: T.ink30, marginTop: 2 }}>
+                    {student.payPeriod || "Her hafta"} ödeme
+                  </div>
+                </div>
+                <span style={{
+                  fontWeight: 750, fontSize: 15, color: T.warn,
+                  fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap",
+                }}>
+                  {money(debt)}
+                </span>
+                <Button size="sm" variant="quiet" onClick={() => setForm(student.id)}>
+                  Tahsil et
+                </Button>
+              </Card>
+            ))}
+          </div>
+        </>
+      )}
 
       <h2 style={{
         fontSize: 15, fontWeight: 700, margin: "0 0 10px",
@@ -2219,6 +2499,12 @@ function FinanceScreen({ data, update, toast, go }) {
       {form && (
         <PaymentForm
           students={data.students}
+          preselect={typeof form === "string" ? form : undefined}
+          suggested={
+            typeof form === "string"
+              ? balances.find((b) => b.student.id === form)?.debt
+              : undefined
+          }
           onClose={() => setForm(false)}
           onSave={(p) => {
             update("payments", (xs) => [{ id: crypto.randomUUID(), ...p }, ...xs]);
