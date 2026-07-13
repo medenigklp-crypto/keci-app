@@ -114,6 +114,20 @@ const Bot = mkIcon(
     <path d="M9 13h.01M15 13h.01" />
   </>
 );
+const Eye = mkIcon(
+  <>
+    <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z" />
+    <circle cx="12" cy="12" r="3" />
+  </>
+);
+const EyeOff = mkIcon(
+  <>
+    <path d="M10.6 6.2A9.9 9.9 0 0 1 12 6c6.5 0 10 7 10 7a17 17 0 0 1-2.7 3.6" />
+    <path d="M6.6 6.8A17 17 0 0 0 2 13s3.5 7 10 7a9.7 9.7 0 0 0 5-1.3" />
+    <path d="M9.9 9.9a3 3 0 0 0 4.2 4.2" />
+    <path d="M3 3l18 18" />
+  </>
+);
 
 /* ═══════════════════════════════════════════════════════════════
    TOKENS
@@ -140,7 +154,26 @@ const GRADES = [
   "9. Sınıf", "10. Sınıf", "11. Sınıf", "12. Sınıf (YKS)", "Mezun", "Üniversite",
 ];
 
-const DURATIONS = ["40 dk", "60 dk", "90 dk", "120 dk"];
+const UNIT_MIN = 45; // 1 ders saati
+
+/** Seçilebilir süreler — dakika cinsinden saklanır, ekranda "2 ders (90 dk)" görünür */
+const DURATION_MINUTES = [45, 90, 135, 180];
+
+/** 90 → "90 dk"  (veritabanında bu biçimde saklanır) */
+const durationValue = (min) => `${min} dk`;
+
+/** "90 dk" → "2 ders (90 dk)" */
+const durationLabel = (value) => {
+  const min = parseInt(value, 10) || 0;
+  if (min % UNIT_MIN === 0) return `${min / UNIT_MIN} ders (${min} dk)`;
+  return `${min} dk`;
+};
+
+const DURATIONS = DURATION_MINUTES.map(durationValue);
+
+/** "90 dk" → 2 ders saati */
+const unitsOf = (value) => (parseInt(value, 10) || 0) / UNIT_MIN;
+
 const DAY_NAMES = ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi", "Pazar"];
 const DAY_SHORT = ["Pzt", "Sal", "Çar", "Per", "Cum", "Cmt", "Paz"];
 const MONTHS = ["Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran", "Temmuz", "Ağustos", "Eylül", "Ekim", "Kasım", "Aralık"];
@@ -179,7 +212,35 @@ const fmtDate = (s) => {
   const d = parseISO(s);
   return `${d.getDate()} ${MONTHS[d.getMonth()].slice(0, 3)}`;
 };
-const money = (n) => "₺" + Number(n || 0).toLocaleString("tr-TR");
+
+/* ── fiyat gizleme ─────────────────────────────────────────────
+   Göz butonuyla açılıp kapanır. Görünüm tercihi, cihazda saklanır. */
+const HIDE_KEY = "keci-hide-prices";
+let HIDE_PRICES = (() => {
+  try { return localStorage.getItem(HIDE_KEY) === "1"; } catch { return false; }
+})();
+const setHidePrices = (v) => {
+  HIDE_PRICES = v;
+  try { localStorage.setItem(HIDE_KEY, v ? "1" : "0"); } catch { /* engelli */ }
+};
+
+const money = (n) =>
+  HIDE_PRICES ? "•••" : "₺" + Number(n || 0).toLocaleString("tr-TR");
+
+/** "90 dk" → 90 */
+const minutesOf = (duration) => parseInt(duration, 10) || 60;
+
+/** "14:00" + "90 dk" → "15:30" */
+const endTime = (time, duration) => {
+  const [h, m] = time.split(":").map(Number);
+  const total = h * 60 + m + minutesOf(duration);
+  const hh = Math.floor(total / 60) % 24;
+  const mm = total % 60;
+  return `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
+};
+
+/** "14:00 – 15:30" */
+const span = (time, duration) => `${time} – ${endTime(time, duration)}`;
 
 /* ═══════════════════════════════════════════════════════════════
    VERİTABANI  — Supabase. Veriler bulutta, cihaz değişse de durur.
@@ -375,7 +436,9 @@ async function aiParseStudent(text) {
 
 grade şu listeden biri olmalı: ${GRADES.join(" | ")}
 duration şu listeden biri olmalı: ${DURATIONS.join(" | ")}
-Bilinmeyen alanlar için: fee 0, duration "60 dk", grade "".
+fee = 1 ders saati (45 dakika) için ücret. Metinde toplam ücret verilmişse ders saatine böl.
+Örnek: "90 dakika 5000 TL" → duration "90 dk", fee 2500.
+Bilinmeyen alanlar için: fee 0, duration "90 dk", grade "".
 
 Metin: ${text}`
   );
@@ -385,7 +448,7 @@ Metin: ${text}`
     name: typeof p.name === "string" ? p.name.trim() : "",
     grade: GRADES.includes(p.grade) ? p.grade : "",
     fee: Number.isFinite(Number(p.fee)) ? Math.max(0, Number(p.fee)) : 0,
-    duration: DURATIONS.includes(p.duration) ? p.duration : "60 dk",
+    duration: DURATIONS.includes(p.duration) ? p.duration : "90 dk",
   };
 }
 
@@ -704,7 +767,7 @@ function StudentForm({ initial, onSave, onClose, toast }) {
   const [name, setName] = useState(initial?.name || "");
   const [grade, setGrade] = useState(initial?.grade || "");
   const [fee, setFee] = useState(String(initial?.fee ?? ""));
-  const [duration, setDuration] = useState(initial?.duration || "60 dk");
+  const [duration, setDuration] = useState(initial?.duration || "90 dk");
   const [aiText, setAiText] = useState("");
   const [aiOpen, setAiOpen] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -728,6 +791,9 @@ function StudentForm({ initial, onSave, onClose, toast }) {
   }
 
   const valid = name.trim().length > 1;
+  const rate = Math.max(0, Number(fee) || 0);
+  const units = unitsOf(duration);
+  const total = Math.round(rate * units);
 
   return (
     <Sheet title={initial ? "Öğrenciyi düzenle" : "Öğrenci ekle"} onClose={onClose}>
@@ -760,7 +826,7 @@ function StudentForm({ initial, onSave, onClose, toast }) {
               <textarea
                 value={aiText}
                 onChange={(e) => setAiText(e.target.value)}
-                placeholder="Ali Yılmaz, 11. sınıf, ders başı 1500 TL, 90 dakika"
+                placeholder="Ali Yılmaz, 11. sınıf, ders saati 2500 TL, 2 ders saati"
                 rows={3}
                 style={{ ...inputStyle, background: T.surface, resize: "none" }}
                 className="k-input"
@@ -788,24 +854,58 @@ function StudentForm({ initial, onSave, onClose, toast }) {
           options={GRADES.map((g) => ({ value: g, label: g }))}
         />
       </Field>
-      <Field label="Ders ücreti" hint="Bir ders için alınan tutar.">
-        <TextInput value={fee} onChange={setFee} type="number" inputMode="numeric" placeholder="0" />
+
+      <Field label="Ders süresi" hint="1 ders saati = 45 dakika.">
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
+          {DURATIONS.map((d) => {
+            const on = duration === d;
+            return (
+              <button
+                key={d}
+                type="button"
+                onClick={() => setDuration(d)}
+                className="k-btn"
+                style={{
+                  padding: "8px 13px", borderRadius: 9, cursor: "pointer",
+                  border: `1.5px solid ${on ? T.brand : T.line}`,
+                  background: on ? T.brandSoft : T.surface,
+                  color: on ? T.brandDeep : T.ink60,
+                  fontWeight: 600, fontSize: 13, fontFamily: "inherit",
+                }}
+              >
+                {durationLabel(d)}
+              </button>
+            );
+          })}
+        </div>
       </Field>
-      <Field label="Ders süresi">
-        <Chips options={DURATIONS} value={duration} onChange={setDuration} />
+
+      <Field label="Ders saati ücreti" hint="1 ders saati (45 dk) için aldığınız ücret.">
+        <TextInput value={fee} onChange={setFee} type="number" inputMode="numeric" placeholder="2500" />
       </Field>
+
+      {rate > 0 && (
+        <div style={{
+          background: T.brandSoft, borderRadius: 11, padding: "11px 13px", marginBottom: 18,
+          display: "flex", alignItems: "center", gap: 8,
+        }}>
+          <Wallet size={15} color={T.brand} />
+          <span style={{ fontSize: 13.5, color: T.ink60 }}>
+            {durationLabel(duration)} →
+          </span>
+          <span style={{
+            fontSize: 15, fontWeight: 750, color: T.brandDeep, marginLeft: "auto",
+            fontVariantNumeric: "tabular-nums",
+          }}>
+            {money(total)}
+          </span>
+        </div>
+      )}
 
       <Button
         full
         disabled={!valid}
-        onClick={() =>
-          onSave({
-            name: name.trim(),
-            grade,
-            fee: Math.max(0, Number(fee) || 0),
-            duration,
-          })
-        }
+        onClick={() => onSave({ name: name.trim(), grade, fee: rate, duration })}
       >
         <Check size={17} /> {initial ? "Değişiklikleri kaydet" : "Öğrenciyi ekle"}
       </Button>
@@ -889,7 +989,7 @@ function StudentsScreen({ data, update, toast, go }) {
                     )}
                   </div>
                   <div style={{ fontSize: 13, color: T.ink60, marginTop: 4, fontVariantNumeric: "tabular-nums" }}>
-                    {money(s.fee)} · {s.duration} · {lessonCount(s.id)} ders planlı
+                    {durationLabel(s.duration)} · {money(s.fee)}/ders saati · {lessonCount(s.id)} ders planlı
                   </div>
                 </div>
                 <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
@@ -970,12 +1070,37 @@ function LessonForm({ students, lessons, date, hour, onSave, onClose }) {
 
   const student = students.find((s) => s.id === studentId);
 
-  // aynı gün ve saatte başka ders var mı
-  const clash = lessons.filter(
-    (l) => l.date === date && l.time.slice(0, 2) === time.slice(0, 2)
-  );
+  const [duration, setDuration] = useState(student?.duration || "90 dk");
+  const [fee, setFee] = useState("");        // boş = otomatik hesapla
+  const [feeTouched, setFeeTouched] = useState(false);
+
+  // öğrenci değişince süreyi onun varsayılanına al
+  useEffect(() => {
+    if (student) setDuration(student.duration);
+  }, [studentId, student]);
+
+  const rate = student?.fee || 0;
+  const autoFee = Math.round(rate * unitsOf(duration));
+  const finalFee = feeTouched ? Math.max(0, Number(fee) || 0) : autoFee;
+
+  // gerçek zaman aralığına göre çakışma
+  const toMin = (t) => {
+    const [h, m] = t.split(":").map(Number);
+    return h * 60 + m;
+  };
+  const start = toMin(time);
+  const finish = start + minutesOf(duration);
+  const clash = lessons.filter((l) => {
+    if (l.date !== date) return false;
+    const ls = toMin(l.time);
+    const le = ls + minutesOf(l.duration);
+    return start < le && ls < finish;
+  });
   const clashNames = clash
-    .map((l) => students.find((s) => s.id === l.studentId)?.name)
+    .map((l) => {
+      const n = students.find((s) => s.id === l.studentId)?.name;
+      return n ? `${n} (${span(l.time, l.duration)})` : null;
+    })
     .filter(Boolean);
 
   return (
@@ -988,14 +1113,77 @@ function LessonForm({ students, lessons, date, hour, onSave, onClose }) {
       <Field label="Öğrenci">
         <Picker
           value={studentId}
-          onChange={setStudentId}
+          onChange={(v) => { setStudentId(v); setFeeTouched(false); }}
           placeholder="Öğrenci seçin"
           options={students.map((s) => ({ value: s.id, label: s.grade ? `${s.name} — ${s.grade}` : s.name }))}
         />
       </Field>
 
-      <Field label="Saat">
+      <Field label="Başlangıç saati">
         <TextInput value={time} onChange={setTime} type="time" />
+      </Field>
+
+      <Field label="Süre">
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
+          {DURATIONS.map((d) => {
+            const on = duration === d;
+            return (
+              <button
+                key={d}
+                type="button"
+                onClick={() => setDuration(d)}
+                className="k-btn"
+                style={{
+                  padding: "8px 13px", borderRadius: 9, cursor: "pointer",
+                  border: `1.5px solid ${on ? T.brand : T.line}`,
+                  background: on ? T.brandSoft : T.surface,
+                  color: on ? T.brandDeep : T.ink60,
+                  fontWeight: 600, fontSize: 13, fontFamily: "inherit",
+                }}
+              >
+                {durationLabel(d)}
+              </button>
+            );
+          })}
+        </div>
+      </Field>
+
+      {/* özet: bitiş saati ve tutar canlı hesaplanır */}
+      <div style={{
+        background: T.brandSoft, borderRadius: 11, padding: "12px 13px", marginBottom: 16,
+      }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <Clock size={15} color={T.brand} />
+          <span style={{
+            fontSize: 15, fontWeight: 750, color: T.brandDeep,
+            fontVariantNumeric: "tabular-nums",
+          }}>
+            {span(time, duration)}
+          </span>
+          <span style={{
+            fontSize: 15, fontWeight: 750, color: T.brandDeep, marginLeft: "auto",
+            fontVariantNumeric: "tabular-nums",
+          }}>
+            {money(finalFee)}
+          </span>
+        </div>
+        {!HIDE_PRICES && rate > 0 && !feeTouched && (
+          <div style={{ fontSize: 12, color: T.ink60, marginTop: 5 }}>
+            {unitsOf(duration)} ders saati × {money(rate)}
+          </div>
+        )}
+      </div>
+
+      <Field
+        label="Tutar"
+        hint={feeTouched ? "Bu ders için elle girildi." : "Otomatik hesaplandı. Değiştirmek isterseniz yazın."}
+      >
+        <TextInput
+          value={feeTouched ? fee : String(autoFee)}
+          onChange={(v) => { setFee(v); setFeeTouched(true); }}
+          type="number"
+          inputMode="numeric"
+        />
       </Field>
 
       {clashNames.length > 0 && (
@@ -1006,7 +1194,7 @@ function LessonForm({ students, lessons, date, hour, onSave, onClose }) {
         }}>
           <AlertCircle size={16} color={T.warn} style={{ marginTop: 1 }} />
           <div style={{ fontSize: 13, color: T.warn, lineHeight: 1.45 }}>
-            <strong style={{ fontWeight: 700 }}>Bu saatte zaten ders var:</strong>{" "}
+            <strong style={{ fontWeight: 700 }}>Bu saatle çakışıyor:</strong>{" "}
             {clashNames.join(", ")}. Grup dersi değilse saati değiştirin.
           </div>
         </div>
@@ -1050,6 +1238,8 @@ function LessonForm({ students, lessons, date, hour, onSave, onClose }) {
           onSave({
             studentId,
             time,
+            duration,
+            fee: finalFee,
             count: repeats ? Math.min(52, Math.max(2, Number(weeks) || 2)) : 1,
           })
         }
@@ -1080,16 +1270,15 @@ function CalendarScreen({ data, update, toast, go }) {
     [data.lessons]
   );
 
-  function addLessons({ studentId, time, count }) {
+  function addLessons({ studentId, time, duration, fee, count }) {
     const base = parseISO(form.date);
-    const student = data.students.find((s) => s.id === studentId);
     const created = Array.from({ length: count }, (_, i) => ({
       id: crypto.randomUUID(),
       studentId,
       date: iso(addDays(base, i * 7)),
       time,
-      duration: student?.duration || "60 dk",
-      fee: student?.fee || 0,
+      duration,
+      fee,
       status: "planned",
     }));
     update("lessons", (xs) => [...xs, ...created]);
@@ -1259,7 +1448,7 @@ function CalendarScreen({ data, update, toast, go }) {
                         >
                           <div style={{ fontWeight: 700, fontSize: 14, color: T.ink }}>{nameOf(l.studentId)}</div>
                           <div style={{ fontSize: 12, color: T.ink60, marginTop: 2, fontVariantNumeric: "tabular-nums" }}>
-                            {l.time} · {l.duration} · {money(l.fee)}
+                            {span(l.time, l.duration)} · {money(l.fee)}
                           </div>
                         </button>
                         <span style={{
@@ -1340,7 +1529,9 @@ function CalendarScreen({ data, update, toast, go }) {
                           <span style={{ display: "block", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                             {nameOf(l.studentId).split(" ")[0]}
                           </span>
-                          <span style={{ opacity: 0.75, fontVariantNumeric: "tabular-nums" }}>{l.time}</span>
+                          <span style={{ opacity: 0.75, fontVariantNumeric: "tabular-nums", fontSize: 9.5 }}>
+                            {l.time}–{endTime(l.time, l.duration)}
+                          </span>
                           {slot.length > 1 && (
                             <span style={{
                               position: "absolute", top: 2, right: 2,
@@ -1958,12 +2149,13 @@ function FinanceScreen({ data, update, toast, go }) {
         />
         <Stat
           icon={Wallet}
-          label="Ders başı ort."
+          label="Ders saati ort."
           value={money(
             data.students.length
               ? Math.round(data.students.reduce((a, s) => a + s.fee, 0) / data.students.length)
               : 0
           )}
+          sub="45 dk başına"
           tone="#9C36B5"
         />
       </div>
@@ -2263,6 +2455,7 @@ export default function App() {
   const [tab, setTab] = useState("ogrenciler");
   const [assistant, setAssistant] = useState(false);
   const [toast, setToast] = useState(null);
+  const [hidden, setHidden] = useState(HIDE_PRICES);
 
   const notify = useCallback((message, tone = "ok") => {
     setToast({ message, tone, key: Date.now() });
@@ -2313,10 +2506,27 @@ export default function App() {
         display: "flex", alignItems: "center", gap: 10,
       }}>
         <Mark size={34} />
-        <div style={{ flex: 1 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontWeight: 780, fontSize: 17, letterSpacing: "-0.02em", lineHeight: 1.1 }}>Keçi</div>
           <div style={{ fontSize: 11.5, color: T.ink60 }}>Özel ders asistanı</div>
         </div>
+
+        <button
+          onClick={() => { setHidePrices(!hidden); setHidden(!hidden); }}
+          aria-label={hidden ? "Fiyatları göster" : "Fiyatları gizle"}
+          title={hidden ? "Fiyatları göster" : "Fiyatları gizle"}
+          className="k-btn"
+          style={{
+            width: 36, height: 36, borderRadius: 10,
+            border: `1px solid ${T.line}`, background: hidden ? T.bg : T.surface,
+            cursor: "pointer", display: "grid", placeItems: "center", flexShrink: 0,
+          }}
+        >
+          {hidden
+            ? <EyeOff size={17} color={T.ink60} />
+            : <Eye size={17} color={T.ink60} />}
+        </button>
+
         <button
           onClick={() => setAssistant(true)}
           aria-label="Asistanı aç"
@@ -2325,7 +2535,7 @@ export default function App() {
             display: "flex", alignItems: "center", gap: 6, padding: "8px 12px",
             borderRadius: 10, border: `1px solid ${T.brand}`, background: T.brandSoft,
             color: T.brandDeep, fontWeight: 650, fontSize: 13, cursor: "pointer",
-            fontFamily: "inherit",
+            fontFamily: "inherit", flexShrink: 0,
           }}
         >
           <Sparkles size={15} color={T.brand} /> Sor
