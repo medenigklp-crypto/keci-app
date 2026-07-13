@@ -182,82 +182,157 @@ const fmtDate = (s) => {
 const money = (n) => "₺" + Number(n || 0).toLocaleString("tr-TR");
 
 /* ═══════════════════════════════════════════════════════════════
-   STORAGE  — tüm veri tek anahtarda; yenilemede kaybolmaz
+   VERİTABANI  — Supabase. Veriler bulutta, cihaz değişse de durur.
    ═══════════════════════════════════════════════════════════════ */
 
-const KEY = "keci-data-v1";
+const SUPABASE_URL = "https://tbkqptlezewykpmkfnhs.supabase.co";
+const SUPABASE_KEY = "sb_publishable_E791sAyC_jiVkRwAP7-sjQ_k3G_GzDi";
+
 const EMPTY = { students: [], lessons: [], homework: [], library: [], payments: [] };
 
-/**
- * İki katmanlı kalıcılık: önce window.storage (artifact ortamı),
- * yoksa localStorage (tarayıcı / kendi projeniz). Biri çalışmazsa diğeri devreye girer.
- */
-const disk = {
-  async read() {
-    try {
-      const res = await window.storage?.get(KEY);
-      if (res?.value) return JSON.parse(res.value);
-    } catch {
-      /* anahtar yok ya da storage yok — localStorage'a düş */
-    }
-    try {
-      const raw = localStorage.getItem(KEY);
-      if (raw) return JSON.parse(raw);
-    } catch {
-      /* localStorage engelli */
-    }
-    return null;
+/** Uygulama alan adları ↔ veritabanı sütun adları */
+const TABLES = {
+  students: {
+    toDb: (s) => ({ id: s.id, name: s.name, grade: s.grade, fee: s.fee, duration: s.duration, active: s.active }),
+    fromDb: (r) => ({ id: r.id, name: r.name, grade: r.grade || "", fee: Number(r.fee) || 0, duration: r.duration, active: r.active }),
   },
-
-  async write(value) {
-    const raw = JSON.stringify(value);
-    let saved = false;
-    try {
-      localStorage.setItem(KEY, raw);
-      saved = true;
-    } catch {
-      /* kota dolu ya da gizli mod */
-    }
-    try {
-      await window.storage?.set(KEY, raw);
-      saved = true;
-    } catch {
-      /* artifact storage yok */
-    }
-    if (!saved) throw new Error("write");
+  lessons: {
+    toDb: (l) => ({ id: l.id, student_id: l.studentId, date: l.date, time: l.time, duration: l.duration, fee: l.fee, status: l.status }),
+    fromDb: (r) => ({ id: r.id, studentId: r.student_id, date: r.date, time: r.time, duration: r.duration, fee: Number(r.fee) || 0, status: r.status }),
+  },
+  homework: {
+    toDb: (h) => ({ id: h.id, student_id: h.studentId || null, text: h.text, due: h.due, status: h.status }),
+    fromDb: (r) => ({ id: r.id, studentId: r.student_id || "", text: r.text, due: r.due, status: r.status }),
+  },
+  library: {
+    toDb: (k) => ({ id: k.id, kind: k.kind, title: k.title, text: k.text || null, questions: k.questions || null, created_at: k.created }),
+    fromDb: (r) => ({ id: r.id, kind: r.kind, title: r.title, text: r.text || "", questions: r.questions || null, created: (r.created_at || "").slice(0, 10) }),
+  },
+  payments: {
+    toDb: (p) => ({ id: p.id, student_id: p.studentId, amount: p.amount, date: p.date, note: p.note }),
+    fromDb: (r) => ({ id: r.id, studentId: r.student_id, amount: Number(r.amount) || 0, date: r.date, note: r.note || "" }),
   },
 };
+
+const HEADERS = {
+  apikey: SUPABASE_KEY,
+  Authorization: `Bearer ${SUPABASE_KEY}`,
+  "Content-Type": "application/json",
+};
+
+async function rest(path, options = {}) {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
+    ...options,
+    headers: { ...HEADERS, ...(options.headers || {}) },
+  });
+  if (!res.ok) throw new Error(await res.text());
+  if (options.method && options.method !== "GET") return null;
+  return res.json();
+}
+
+async function loadAll() {
+  const names = Object.keys(TABLES);
+  const results = await Promise.all(
+    names.map((n) => rest(`${n}?select=*&order=created_at.asc`))
+  );
+  const out = { ...EMPTY };
+  names.forEach((n, i) => {
+    out[n] = results[i].map(TABLES[n].fromDb);
+  });
+  // kütüphane ve ödevlerde en yeni üstte
+  out.library.reverse();
+  out.homework.reverse();
+  out.payments.reverse();
+  return out;
+}
+
+/** İki listeyi karşılaştırır, sadece değişenleri veritabanına yazar */
+async function syncTable(name, prev, next) {
+  const { toDb } = TABLES[name];
+  const prevById = new Map(prev.map((r) => [r.id, r]));
+  const nextById = new Map(next.map((r) => [r.id, r]));
+
+  const added = next.filter((r) => !prevById.has(r.id));
+  const removed = prev.filter((r) => !nextById.has(r.id));
+  const changed = next.filter((r) => {
+    const before = prevById.get(r.id);
+    return before && JSON.stringify(toDb(before)) !== JSON.stringify(toDb(r));
+  });
+
+  if (added.length) {
+    await rest(name, {
+      method: "POST",
+      headers: { Prefer: "return=minimal" },
+      body: JSON.stringify(added.map(toDb)),
+    });
+  }
+  for (const r of changed) {
+    await rest(`${name}?id=eq.${r.id}`, {
+      method: "PATCH",
+      headers: { Prefer: "return=minimal" },
+      body: JSON.stringify(toDb(r)),
+    });
+  }
+  for (const r of removed) {
+    await rest(`${name}?id=eq.${r.id}`, {
+      method: "DELETE",
+      headers: { Prefer: "return=minimal" },
+    });
+  }
+}
 
 function useStore() {
   const [data, setData] = useState(EMPTY);
   const [ready, setReady] = useState(false);
   const [error, setError] = useState(null);
+  const queue = useRef(Promise.resolve()); // yazmaları sıraya sokar
 
-  // ilk açılışta oku
   useEffect(() => {
     let alive = true;
-    disk.read().then((saved) => {
-      if (!alive) return;
-      if (saved) setData({ ...EMPTY, ...saved });
-      setReady(true);
-    });
+    loadAll()
+      .then((d) => {
+        if (!alive) return;
+        setData(d);
+        setReady(true);
+      })
+      .catch(() => {
+        if (!alive) return;
+        setError("Veriler yüklenemedi. Bağlantınızı kontrol edip sayfayı yenileyin.");
+        setReady(true);
+      });
     return () => { alive = false; };
   }, []);
 
-  // her değişiklikte yaz — okuma bitmeden yazma
-  useEffect(() => {
-    if (!ready) return;
-    disk.write(data).catch(() =>
-      setError("Kaydedilemedi. Tarayıcınızın site verilerine izin verdiğinden emin olun.")
-    );
-  }, [data, ready]);
-
-  /** update(collection, fn) — koleksiyonu değiştirir; kayıt otomatik */
-  const update = useCallback((key, fn) => {
-    setData((prev) => ({ ...prev, [key]: fn(prev[key]) }));
+  /** update(tablo, fn) — ekranı hemen günceller, arka planda veritabanına yazar */
+  const update = useCallback((name, fn) => {
+    setData((prev) => {
+      const next = { ...prev, [name]: fn(prev[name]) };
+      queue.current = queue.current
+        .then(() => syncTable(name, prev[name], next[name]))
+        .catch(() => setError("Kaydedilemedi. Bağlantınızı kontrol edin."));
+      return next;
+    });
   }, []);
 
-  const reset = useCallback(() => setData(EMPTY), []);
+  const reset = useCallback(() => {
+    setData(EMPTY);
+    queue.current = queue.current
+      .then(async () => {
+        await rest("students?id=neq.00000000-0000-0000-0000-000000000000", {
+          method: "DELETE",
+          headers: { Prefer: "return=minimal" },
+        });
+        await rest("library?id=neq.00000000-0000-0000-0000-000000000000", {
+          method: "DELETE",
+          headers: { Prefer: "return=minimal" },
+        });
+        await rest("homework?id=neq.00000000-0000-0000-0000-000000000000", {
+          method: "DELETE",
+          headers: { Prefer: "return=minimal" },
+        });
+      })
+      .catch(() => setError("Silinemedi. Bağlantınızı kontrol edin."));
+  }, []);
 
   return { data, ready, error, update, reset, clearError: () => setError(null) };
 }
@@ -887,13 +962,21 @@ const STATUS = {
 };
 const NEXT_STATUS = { planned: "done", done: "cancelled", cancelled: "planned" };
 
-function LessonForm({ students, date, hour, onSave, onClose }) {
+function LessonForm({ students, lessons, date, hour, onSave, onClose }) {
   const [studentId, setStudentId] = useState(students[0]?.id || "");
   const [time, setTime] = useState(`${String(hour ?? 9).padStart(2, "0")}:00`);
   const [repeats, setRepeats] = useState(false);
   const [weeks, setWeeks] = useState("8");
 
   const student = students.find((s) => s.id === studentId);
+
+  // aynı gün ve saatte başka ders var mı
+  const clash = lessons.filter(
+    (l) => l.date === date && l.time.slice(0, 2) === time.slice(0, 2)
+  );
+  const clashNames = clash
+    .map((l) => students.find((s) => s.id === l.studentId)?.name)
+    .filter(Boolean);
 
   return (
     <Sheet title="Ders ekle" onClose={onClose}>
@@ -914,6 +997,20 @@ function LessonForm({ students, date, hour, onSave, onClose }) {
       <Field label="Saat">
         <TextInput value={time} onChange={setTime} type="time" />
       </Field>
+
+      {clashNames.length > 0 && (
+        <div style={{
+          display: "flex", gap: 9, alignItems: "flex-start",
+          background: T.warnSoft, border: `1px solid ${T.warn}33`,
+          borderRadius: 11, padding: 12, marginBottom: 16,
+        }}>
+          <AlertCircle size={16} color={T.warn} style={{ marginTop: 1 }} />
+          <div style={{ fontSize: 13, color: T.warn, lineHeight: 1.45 }}>
+            <strong style={{ fontWeight: 700 }}>Bu saatte zaten ders var:</strong>{" "}
+            {clashNames.join(", ")}. Grup dersi değilse saati değiştirin.
+          </div>
+        </div>
+      )}
 
       <div style={{
         border: `1px solid ${T.line}`, borderRadius: 12, padding: 13, marginBottom: 18,
@@ -1124,7 +1221,7 @@ function CalendarScreen({ data, update, toast, go }) {
             </p>
           )}
           {HOURS.map((h) => {
-            const l = dayLessons.find((x) => Number(x.time.slice(0, 2)) === h);
+            const slot = dayLessons.filter((x) => Number(x.time.slice(0, 2)) === h);
             return (
               <div key={h} style={{ display: "flex", borderTop: `1px solid ${T.line}`, minHeight: 54 }}>
                 <span style={{
@@ -1133,41 +1230,8 @@ function CalendarScreen({ data, update, toast, go }) {
                 }}>
                   {String(h).padStart(2, "0")}:00
                 </span>
-                <div style={{ flex: 1, padding: "5px 0 5px 6px" }}>
-                  {l ? (
-                    <div style={{
-                      background: STATUS[l.status].bg, borderLeft: `3px solid ${STATUS[l.status].fg}`,
-                      borderRadius: "0 10px 10px 0", padding: "9px 10px",
-                      display: "flex", alignItems: "center", gap: 8,
-                    }}>
-                      <button
-                        onClick={() => cycleStatus(l.id)}
-                        className="k-btn"
-                        style={{ flex: 1, textAlign: "left", background: "none", border: "none", cursor: "pointer", padding: 0, fontFamily: "inherit" }}
-                        title="Durumu değiştirmek için dokunun"
-                      >
-                        <div style={{ fontWeight: 700, fontSize: 14, color: T.ink }}>{nameOf(l.studentId)}</div>
-                        <div style={{ fontSize: 12, color: T.ink60, marginTop: 2, fontVariantNumeric: "tabular-nums" }}>
-                          {l.time} · {l.duration} · {money(l.fee)}
-                        </div>
-                      </button>
-                      <span style={{
-                        fontSize: 10.5, fontWeight: 700, color: STATUS[l.status].fg,
-                        border: `1px solid ${STATUS[l.status].fg}33`, padding: "3px 7px", borderRadius: 6,
-                        whiteSpace: "nowrap",
-                      }}>
-                        {STATUS[l.status].label}
-                      </span>
-                      <button
-                        onClick={() => setPendingDelete(l)}
-                        aria-label="Dersi sil"
-                        className="k-btn"
-                        style={{ background: "none", border: "none", cursor: "pointer", padding: 2, display: "grid", placeItems: "center" }}
-                      >
-                        <Trash2 size={14} color={T.ink30} />
-                      </button>
-                    </div>
-                  ) : (
+                <div style={{ flex: 1, padding: "5px 0 5px 6px", display: "grid", gap: 5 }}>
+                  {slot.length === 0 ? (
                     <button
                       onClick={() => setForm({ date: iso(selected), hour: h })}
                       aria-label={`${String(h).padStart(2, "0")}:00 için ders ekle`}
@@ -1177,6 +1241,53 @@ function CalendarScreen({ data, update, toast, go }) {
                         borderRadius: 9, cursor: "pointer",
                       }}
                     />
+                  ) : (
+                    slot.map((l) => (
+                      <div
+                        key={l.id}
+                        style={{
+                          background: STATUS[l.status].bg, borderLeft: `3px solid ${STATUS[l.status].fg}`,
+                          borderRadius: "0 10px 10px 0", padding: "9px 10px",
+                          display: "flex", alignItems: "center", gap: 8,
+                        }}
+                      >
+                        <button
+                          onClick={() => cycleStatus(l.id)}
+                          className="k-btn"
+                          style={{ flex: 1, textAlign: "left", background: "none", border: "none", cursor: "pointer", padding: 0, fontFamily: "inherit" }}
+                          title="Durumu değiştirmek için dokunun"
+                        >
+                          <div style={{ fontWeight: 700, fontSize: 14, color: T.ink }}>{nameOf(l.studentId)}</div>
+                          <div style={{ fontSize: 12, color: T.ink60, marginTop: 2, fontVariantNumeric: "tabular-nums" }}>
+                            {l.time} · {l.duration} · {money(l.fee)}
+                          </div>
+                        </button>
+                        <span style={{
+                          fontSize: 10.5, fontWeight: 700, color: STATUS[l.status].fg,
+                          border: `1px solid ${STATUS[l.status].fg}33`, padding: "3px 7px", borderRadius: 6,
+                          whiteSpace: "nowrap",
+                        }}>
+                          {STATUS[l.status].label}
+                        </span>
+                        <button
+                          onClick={() => setPendingDelete(l)}
+                          aria-label="Dersi sil"
+                          className="k-btn"
+                          style={{ background: "none", border: "none", cursor: "pointer", padding: 2, display: "grid", placeItems: "center" }}
+                        >
+                          <Trash2 size={14} color={T.ink30} />
+                        </button>
+                      </div>
+                    ))
+                  )}
+                  {slot.length > 1 && (
+                    <div style={{
+                      display: "flex", alignItems: "center", gap: 5,
+                      fontSize: 11.5, color: T.warn, fontWeight: 600, paddingLeft: 3,
+                    }}>
+                      <AlertCircle size={12} color={T.warn} />
+                      Bu saatte {slot.length} ders çakışıyor
+                    </div>
                   )}
                 </div>
               </div>
@@ -1210,7 +1321,8 @@ function CalendarScreen({ data, update, toast, go }) {
                   {String(h).padStart(2, "0")}
                 </div>
                 {week.map((d) => {
-                  const l = onDate(d).find((x) => Number(x.time.slice(0, 2)) === h);
+                  const slot = onDate(d).filter((x) => Number(x.time.slice(0, 2)) === h);
+                  const l = slot[0];
                   return (
                     <div key={iso(d)} style={{ flex: 1, borderLeft: `1px solid ${T.line}`, padding: 2 }}>
                       {l ? (
@@ -1222,13 +1334,22 @@ function CalendarScreen({ data, update, toast, go }) {
                             background: STATUS[l.status].bg, border: `1px solid ${STATUS[l.status].fg}44`,
                             color: STATUS[l.status].fg, cursor: "pointer", padding: "3px 5px",
                             fontSize: 10.5, fontWeight: 700, textAlign: "left", overflow: "hidden",
-                            fontFamily: "inherit",
+                            fontFamily: "inherit", position: "relative",
                           }}
                         >
                           <span style={{ display: "block", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                             {nameOf(l.studentId).split(" ")[0]}
                           </span>
                           <span style={{ opacity: 0.75, fontVariantNumeric: "tabular-nums" }}>{l.time}</span>
+                          {slot.length > 1 && (
+                            <span style={{
+                              position: "absolute", top: 2, right: 2,
+                              background: T.warn, color: "#fff", borderRadius: 5,
+                              fontSize: 9, fontWeight: 700, padding: "1px 4px",
+                            }}>
+                              +{slot.length - 1}
+                            </span>
+                          )}
                         </button>
                       ) : (
                         <button
@@ -1263,6 +1384,7 @@ function CalendarScreen({ data, update, toast, go }) {
       {form && (
         <LessonForm
           students={data.students}
+          lessons={data.lessons}
           date={form.date}
           hour={form.hour}
           onSave={addLessons}
@@ -1451,7 +1573,7 @@ function HomeworkScreen({ data, update, toast, go }) {
 
   function saveAssignment({ studentId, text, due, saveToLibrary }) {
     update("homework", (xs) => [
-      { id: crypto.randomUUID(), studentId, text, due, assigned: iso(new Date()), status: "pending" },
+      { id: crypto.randomUUID(), studentId, text, due, status: "pending" },
       ...xs,
     ]);
     if (saveToLibrary) {
