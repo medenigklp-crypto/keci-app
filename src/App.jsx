@@ -128,6 +128,131 @@ const EyeOff = mkIcon(
     <path d="M3 3l18 18" />
   </>
 );
+const Phone = mkIcon(
+  <path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.4 1.8.7 2.7a2 2 0 0 1-.5 2.1L8.1 9.7a16 16 0 0 0 6 6l1.2-1.2a2 2 0 0 1 2.1-.5c.9.3 1.8.6 2.7.7a2 2 0 0 1 1.9 2.2Z" />
+);
+const WhatsApp = ({ size = 20, color = "currentColor", style }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill={color} style={{ flexShrink: 0, ...style }} aria-hidden="true">
+    <path d="M17.5 14.4c-.3-.15-1.7-.85-2-.94-.26-.1-.45-.15-.64.15-.19.29-.74.94-.9 1.13-.17.19-.34.21-.63.07-.3-.15-1.24-.46-2.36-1.46-.87-.78-1.46-1.74-1.63-2.03-.17-.3-.02-.46.13-.6.13-.14.3-.35.44-.53.15-.18.2-.3.3-.5.09-.19.04-.36-.02-.5-.08-.15-.65-1.55-.89-2.12-.23-.56-.47-.48-.64-.49h-.55c-.19 0-.5.07-.76.36-.26.29-1 .98-1 2.38s1.03 2.76 1.17 2.95c.14.2 2.02 3.08 4.9 4.32.68.3 1.21.47 1.63.6.68.22 1.3.19 1.8.11.55-.08 1.7-.69 1.94-1.36.24-.67.24-1.24.17-1.36-.07-.12-.26-.19-.55-.34Z"/>
+    <path d="M12 2a10 10 0 0 0-8.5 15.3L2 22l4.8-1.5A10 10 0 1 0 12 2Zm0 18.2a8.2 8.2 0 0 1-4.2-1.15l-.3-.18-3.1.97.99-3.02-.2-.31A8.2 8.2 0 1 1 12 20.2Z"/>
+  </svg>
+);
+
+/* ═══════════════════════════════════════════════════════════════
+   MESAJ GÖNDER  — WhatsApp'ı mesaj yazılı açar, gönder'e siz basarsınız
+   ═══════════════════════════════════════════════════════════════ */
+
+function SendSheet({ title, student, buildForStudent, buildForParent, onClose, toast }) {
+  const hasStudent = Boolean(normalizePhone(student.studentPhone));
+  const hasParent = Boolean(normalizePhone(student.parentPhone));
+
+  const [to, setTo] = useState(hasParent && buildForParent ? "parent" : "student");
+  const build = to === "parent" ? buildForParent : buildForStudent;
+  const [text, setText] = useState(build ? build() : "");
+
+  // alıcı değişince metni o alıcıya göre yeniden kur
+  useEffect(() => {
+    const b = to === "parent" ? buildForParent : buildForStudent;
+    if (b) setText(b());
+  }, [to]); // eslint-disable-line
+
+  const phone = to === "parent" ? student.parentPhone : student.studentPhone;
+  const label = to === "parent"
+    ? (student.parentName ? `${student.parentName} (veli)` : "Veli")
+    : student.name;
+  const canSend = Boolean(normalizePhone(phone)) && text.trim();
+
+  function send() {
+    if (openWhatsApp(phone, text)) {
+      onClose();
+      toast("WhatsApp açıldı — gönder'e basmayı unutmayın.");
+    } else {
+      toast("Numara eksik. Öğrenciyi düzenleyip numarayı ekleyin.", "bad");
+    }
+  }
+
+  return (
+    <Sheet title={title} onClose={onClose}>
+      <Field label="Kime">
+        <div style={{ display: "flex", gap: 7 }}>
+          {buildForStudent && (
+            <button
+              type="button"
+              onClick={() => setTo("student")}
+              disabled={!hasStudent}
+              className="k-btn"
+              style={{
+                flex: 1, padding: "10px 12px", borderRadius: 10, cursor: hasStudent ? "pointer" : "not-allowed",
+                border: `1.5px solid ${to === "student" ? T.brand : T.line}`,
+                background: to === "student" ? T.brandSoft : T.surface,
+                color: hasStudent ? (to === "student" ? T.brandDeep : T.ink60) : T.ink30,
+                fontWeight: 650, fontSize: 13, fontFamily: "inherit", textAlign: "left",
+                opacity: hasStudent ? 1 : 0.55,
+              }}
+            >
+              <div>Öğrenci</div>
+              <div style={{ fontSize: 11, fontWeight: 500, marginTop: 2 }}>
+                {hasStudent ? student.name.split(" ")[0] : "numara yok"}
+              </div>
+            </button>
+          )}
+          {buildForParent && (
+            <button
+              type="button"
+              onClick={() => setTo("parent")}
+              disabled={!hasParent}
+              className="k-btn"
+              style={{
+                flex: 1, padding: "10px 12px", borderRadius: 10, cursor: hasParent ? "pointer" : "not-allowed",
+                border: `1.5px solid ${to === "parent" ? T.brand : T.line}`,
+                background: to === "parent" ? T.brandSoft : T.surface,
+                color: hasParent ? (to === "parent" ? T.brandDeep : T.ink60) : T.ink30,
+                fontWeight: 650, fontSize: 13, fontFamily: "inherit", textAlign: "left",
+                opacity: hasParent ? 1 : 0.55,
+              }}
+            >
+              <div>Veli</div>
+              <div style={{ fontSize: 11, fontWeight: 500, marginTop: 2 }}>
+                {hasParent ? (student.parentName || "veli") : "numara yok"}
+              </div>
+            </button>
+          )}
+        </div>
+      </Field>
+
+      <Field label="Mesaj" hint="Göndermeden önce düzenleyebilirsiniz.">
+        <textarea
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          rows={9}
+          className="k-input"
+          style={{ ...inputStyle, resize: "vertical", lineHeight: 1.5, fontSize: 14 }}
+        />
+      </Field>
+
+      {!canSend && (
+        <div style={{
+          display: "flex", gap: 9, alignItems: "flex-start",
+          background: T.warnSoft, borderRadius: 11, padding: 12, marginBottom: 16,
+        }}>
+          <AlertCircle size={16} color={T.warn} style={{ marginTop: 1 }} />
+          <div style={{ fontSize: 13, color: T.warn, lineHeight: 1.45 }}>
+            {label} için telefon numarası kayıtlı değil. Öğrenciler sekmesinden ekleyin.
+          </div>
+        </div>
+      )}
+
+      <Button full disabled={!canSend} onClick={send}>
+        <WhatsApp size={17} color="#fff" /> WhatsApp'ta aç
+      </Button>
+      <p style={{
+        margin: "10px 0 0", fontSize: 12, color: T.ink30, textAlign: "center", lineHeight: 1.45,
+      }}>
+        WhatsApp mesaj yazılı açılır. Gönder'e siz basarsınız.
+      </p>
+    </Sheet>
+  );
+}
 
 /* ═══════════════════════════════════════════════════════════════
    TOKENS
@@ -259,23 +384,27 @@ const TABLES = {
     toDb: (s) => ({
       id: s.id, name: s.name, grade: s.grade, fee: s.fee,
       duration: s.duration, active: s.active, pay_period: s.payPeriod,
+      student_no: s.studentNo || "", student_phone: s.studentPhone || "",
+      parent_name: s.parentName || "", parent_phone: s.parentPhone || "",
     }),
     fromDb: (r) => ({
       id: r.id, name: r.name, grade: r.grade || "", fee: Number(r.fee) || 0,
       duration: r.duration, active: r.active,
       payPeriod: r.pay_period || "Her hafta",
+      studentNo: r.student_no || "", studentPhone: r.student_phone || "",
+      parentName: r.parent_name || "", parentPhone: r.parent_phone || "",
     }),
   },
   lessons: {
     toDb: (l) => ({
       id: l.id, student_id: l.studentId, date: l.date, time: l.time,
       duration: l.duration, fee: l.fee, status: l.status,
-      topic: l.topic || "", note: l.note || "",
+      topic: l.topic || "", note: l.note || "", attendance: l.attendance || "",
     }),
     fromDb: (r) => ({
       id: r.id, studentId: r.student_id, date: r.date, time: r.time,
       duration: r.duration, fee: Number(r.fee) || 0, status: r.status,
-      topic: r.topic || "", note: r.note || "",
+      topic: r.topic || "", note: r.note || "", attendance: r.attendance || "",
     }),
   },
   homework: {
@@ -509,6 +638,86 @@ const AI_ERRORS = {
   empty: "Yapay zekâ boş yanıt verdi. Tekrar deneyin.",
 };
 const aiErrorText = (e) => AI_ERRORS[e?.message] || AI_ERRORS.network;
+
+/* ═══════════════════════════════════════════════════════════════
+   WHATSAPP  — mesajı hazırlar, WhatsApp'ta açar. Gönder'e siz basarsınız.
+   ═══════════════════════════════════════════════════════════════ */
+
+/** "0532 111 22 33" → "905321112233" */
+function normalizePhone(raw) {
+  const d = String(raw || "").replace(/\D/g, "");
+  if (!d) return "";
+  if (d.startsWith("90")) return d;
+  if (d.startsWith("0")) return "90" + d.slice(1);
+  if (d.length === 10) return "90" + d;
+  return d;
+}
+
+/** WhatsApp'ı mesaj yazılı olarak açar */
+function openWhatsApp(phone, text) {
+  const p = normalizePhone(phone);
+  if (!p) return false;
+  window.open(`https://wa.me/${p}?text=${encodeURIComponent(text)}`, "_blank");
+  return true;
+}
+
+/** Mesaj şablonları — düzenlenebilir, gönderilmeden önce görürsünüz */
+const MESSAGES = {
+  homework: (h, student, toParent) => {
+    const who = toParent ? `${student.name} için ödev` : "Ödevin";
+    return `Merhaba${toParent ? "" : ` ${student.name.split(" ")[0]}`},
+
+${who}:
+${h.text}
+
+Teslim tarihi: ${fmtDate(h.due)}
+
+İyi çalışmalar.`;
+  },
+
+  absence: (l, student, toParent) => {
+    const opening = toParent
+      ? `Merhaba, ${student.name} bugünkü derse katılmadı.`
+      : `Merhaba ${student.name.split(" ")[0]}, bugünkü derse katılmadın.`;
+    return `${opening}
+
+Tarih: ${fmtDate(l.date)}
+Saat: ${span(l.time, l.duration)}${l.topic ? `\nKonu: ${l.topic}` : ""}
+
+${toParent ? "Bilginize." : "Telafi için bana yazabilirsin."}`;
+  },
+
+  payment: (student, debt, lessons) => {
+    const done = lessons.filter((l) => l.studentId === student.id && l.status === "done");
+    const units = done.reduce((a, l) => a + unitsOf(l.duration), 0);
+    return `Merhaba,
+
+${student.name} için ödeme bilgisi:
+
+Yapılan ders: ${done.length} (${units} ders saati)
+Ödenecek tutar: ${"₺" + Number(debt).toLocaleString("tr-TR")}
+Ödeme dönemi: ${student.payPeriod || "Her hafta"}
+
+Teşekkürler.`;
+  },
+
+  progress: (student, lessons) => {
+    const done = lessons
+      .filter((l) => l.studentId === student.id && l.status === "done" && l.topic)
+      .sort((a, b) => b.date.localeCompare(a.date))
+      .slice(0, 5);
+    const list = done.length
+      ? done.map((l) => `• ${fmtDate(l.date)} — ${l.topic}`).join("\n")
+      : "Henüz konu kaydı yok.";
+    return `Merhaba,
+
+${student.name} ile son işlediğimiz konular:
+
+${list}
+
+İyi günler.`;
+  },
+};
 
 /* ═══════════════════════════════════════════════════════════════
    PRIMITIVES
@@ -786,6 +995,10 @@ function StudentForm({ initial, onSave, onClose, toast }) {
   const [fee, setFee] = useState(String(initial?.fee ?? ""));
   const [duration, setDuration] = useState(initial?.duration || "90 dk");
   const [payPeriod, setPayPeriod] = useState(initial?.payPeriod || "Her hafta");
+  const [studentNo, setStudentNo] = useState(initial?.studentNo || "");
+  const [studentPhone, setStudentPhone] = useState(initial?.studentPhone || "");
+  const [parentName, setParentName] = useState(initial?.parentName || "");
+  const [parentPhone, setParentPhone] = useState(initial?.parentPhone || "");
   const [aiText, setAiText] = useState("");
   const [aiOpen, setAiOpen] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -872,6 +1085,45 @@ function StudentForm({ initial, onSave, onClose, toast }) {
           options={GRADES.map((g) => ({ value: g, label: g }))}
         />
       </Field>
+      <Field label="Öğrenci numarası" hint="İsteğe bağlı.">
+        <TextInput value={studentNo} onChange={setStudentNo} placeholder="1234" />
+      </Field>
+
+      {/* iletişim — WhatsApp mesajları buradan gider */}
+      <div style={{
+        border: `1px solid ${T.line}`, borderRadius: 12, padding: 13, marginBottom: 16,
+      }}>
+        <div style={{
+          display: "flex", alignItems: "center", gap: 7, marginBottom: 12,
+          fontSize: 13, fontWeight: 700, color: T.ink,
+        }}>
+          <Phone size={14} color={T.brand} /> İletişim
+        </div>
+
+        <Field label="Öğrenci telefonu" hint="Ödev ve devamsızlık mesajları buraya gider.">
+          <TextInput
+            value={studentPhone}
+            onChange={setStudentPhone}
+            type="tel"
+            inputMode="tel"
+            placeholder="0532 111 22 33"
+          />
+        </Field>
+
+        <Field label="Veli adı">
+          <TextInput value={parentName} onChange={setParentName} placeholder="Ayşe Yılmaz" />
+        </Field>
+
+        <Field label="Veli telefonu" hint="Ödeme ve bilgilendirme mesajları buraya gider.">
+          <TextInput
+            value={parentPhone}
+            onChange={setParentPhone}
+            type="tel"
+            inputMode="tel"
+            placeholder="0533 444 55 66"
+          />
+        </Field>
+      </div>
 
       <Field label="Ders süresi" hint="1 ders saati = 45 dakika.">
         <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
@@ -927,7 +1179,15 @@ function StudentForm({ initial, onSave, onClose, toast }) {
       <Button
         full
         disabled={!valid}
-        onClick={() => onSave({ name: name.trim(), grade, fee: rate, duration, payPeriod })}
+        onClick={() =>
+          onSave({
+            name: name.trim(), grade, fee: rate, duration, payPeriod,
+            studentNo: studentNo.trim(),
+            studentPhone: studentPhone.trim(),
+            parentName: parentName.trim(),
+            parentPhone: parentPhone.trim(),
+          })
+        }
       >
         <Check size={17} /> {initial ? "Değişiklikleri kaydet" : "Öğrenciyi ekle"}
       </Button>
@@ -936,7 +1196,7 @@ function StudentForm({ initial, onSave, onClose, toast }) {
 }
 
 /** Bir öğrencinin tüm ders geçmişi — hangi tarih, hangi konu, hangi not */
-function HistorySheet({ student, lessons, onClose, onEditTopic }) {
+function HistorySheet({ student, lessons, onClose, onEditTopic, onSendProgress }) {
   const [q, setQ] = useState("");
 
   const mine = useMemo(() => {
@@ -976,8 +1236,14 @@ function HistorySheet({ student, lessons, onClose, onEditTopic }) {
         </div>
       </div>
 
+      {done.length > 0 && (
+        <Button size="sm" variant="outline" full onClick={onSendProgress}>
+          <WhatsApp size={15} color="#25D366" /> Veliye ilerleme özeti gönder
+        </Button>
+      )}
+
       {lessons.some((l) => l.studentId === student.id) && (
-        <div style={{ position: "relative", marginBottom: 14 }}>
+        <div style={{ position: "relative", margin: "14px 0" }}>
           <Search size={16} color={T.ink30} style={{ position: "absolute", left: 11, top: 12 }} />
           <input
             value={q}
@@ -1089,6 +1355,7 @@ function StudentsScreen({ data, update, toast, go }) {
   const [pendingDelete, setPendingDelete] = useState(null);
   const [history, setHistory] = useState(null);   // geçmişi açık öğrenci
   const [topicOf, setTopicOf] = useState(null);   // konusu düzenlenen ders
+  const [send, setSend] = useState(null);         // ilerleme mesajı gönderilecek öğrenci
 
   const list = useMemo(() => {
     const term = q.trim().toLocaleLowerCase("tr");
@@ -1163,7 +1430,7 @@ function StudentsScreen({ data, update, toast, go }) {
                     {durationLabel(s.duration)} · {money(s.fee)}/ders saati
                   </div>
                   <div style={{ fontSize: 12, color: T.ink30, marginTop: 3 }}>
-                    Ödeme: {s.payPeriod || "Her hafta"} · {lessonCount(s.id)} ders planlı
+                    {s.studentNo ? `No ${s.studentNo} · ` : ""}Ödeme: {s.payPeriod || "Her hafta"} · {lessonCount(s.id)} ders
                   </div>
                 </div>
                 <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
@@ -1226,6 +1493,17 @@ function StudentsScreen({ data, update, toast, go }) {
           lessons={data.lessons}
           onClose={() => setHistory(null)}
           onEditTopic={(l) => setTopicOf(l)}
+          onSendProgress={() => { setSend(history); setHistory(null); }}
+        />
+      )}
+      {send && (
+        <SendSheet
+          title="İlerleme özeti"
+          student={send}
+          buildForParent={() => MESSAGES.progress(send, data.lessons)}
+          buildForStudent={() => MESSAGES.progress(send, data.lessons)}
+          onClose={() => setSend(null)}
+          toast={toast}
         />
       )}
       {topicOf && (
@@ -1260,7 +1538,7 @@ function StudentsScreen({ data, update, toast, go }) {
 const STATUS = {
   planned: { label: "Planlandı", fg: T.brandDeep, bg: T.brandSoft },
   done: { label: "Yapıldı", fg: T.ok, bg: T.okSoft },
-  cancelled: { label: "İptal", fg: T.warn, bg: T.warnSoft },
+  cancelled: { label: "Gelmedi", fg: T.warn, bg: T.warnSoft },
 };
 const NEXT_STATUS = { planned: "done", done: "cancelled", cancelled: "planned" };
 
@@ -1460,6 +1738,7 @@ function CalendarScreen({ data, update, toast, go }) {
   const [form, setForm] = useState(null);        // { date, hour }
   const [pendingDelete, setPendingDelete] = useState(null);
   const [topicOf, setTopicOf] = useState(null);  // konusu girilen ders
+  const [send, setSend] = useState(null);        // devamsızlık bildirilecek ders
 
   const weekStart = useMemo(() => startOfWeek(anchor), [anchor]);
   const week = useMemo(() => Array.from({ length: 7 }, (_, i) => addDays(weekStart, i)), [weekStart]);
@@ -1673,6 +1952,17 @@ function CalendarScreen({ data, update, toast, go }) {
                         }}>
                           {STATUS[l.status].label}
                         </span>
+                        {l.status === "cancelled" && (
+                          <button
+                            onClick={() => setSend(l)}
+                            aria-label="Devamsızlığı bildir"
+                            title="Devamsızlığı WhatsApp ile bildir"
+                            className="k-btn"
+                            style={{ background: "none", border: "none", cursor: "pointer", padding: 2, display: "grid", placeItems: "center" }}
+                          >
+                            <WhatsApp size={16} color="#25D366" />
+                          </button>
+                        )}
                         <button
                           onClick={() => setPendingDelete(l)}
                           aria-label="Dersi sil"
@@ -1797,6 +2087,20 @@ function CalendarScreen({ data, update, toast, go }) {
           onClose={() => setForm(null)}
         />
       )}
+      {send && (() => {
+        const student = data.students.find((s) => s.id === send.studentId);
+        if (!student) return null;
+        return (
+          <SendSheet
+            title="Devamsızlığı bildir"
+            student={student}
+            buildForStudent={() => MESSAGES.absence(send, student, false)}
+            buildForParent={() => MESSAGES.absence(send, student, true)}
+            onClose={() => setSend(null)}
+            toast={toast}
+          />
+        );
+      })()}
       {topicOf && (
         <TopicForm
           lesson={topicOf}
@@ -1988,6 +2292,7 @@ function HomeworkScreen({ data, update, toast, go }) {
   const [assign, setAssign] = useState(null); // null | {} | {text}
   const [quiz, setQuiz] = useState(false);
   const [pendingDelete, setPendingDelete] = useState(null);
+  const [send, setSend] = useState(null);     // WhatsApp ile gönderilecek ödev
 
   const nameOf = (id) => (id ? data.students.find((s) => s.id === id)?.name || "Silinmiş öğrenci" : "Tüm öğrenciler");
 
@@ -2102,6 +2407,21 @@ function HomeworkScreen({ data, update, toast, go }) {
                       >
                         <Check size={16} color={done ? T.ok : T.ink30} />
                       </button>
+                      {h.studentId && (
+                        <button
+                          onClick={() => setSend(h)}
+                          aria-label="WhatsApp ile gönder"
+                          title="WhatsApp ile gönder"
+                          className="k-btn"
+                          style={{
+                            width: 34, height: 34, borderRadius: 10, cursor: "pointer",
+                            border: `1px solid ${T.line}`, background: T.surface,
+                            display: "grid", placeItems: "center",
+                          }}
+                        >
+                          <WhatsApp size={16} color="#25D366" />
+                        </button>
+                      )}
                       <button
                         onClick={() => setPendingDelete({ kind: "homework", item: h })}
                         aria-label="Ödevi sil"
@@ -2236,6 +2556,20 @@ function HomeworkScreen({ data, update, toast, go }) {
         />
       )}
       {quiz && <QuizForm onSave={saveQuiz} onClose={() => setQuiz(false)} toast={toast} />}
+      {send && (() => {
+        const student = data.students.find((s) => s.id === send.studentId);
+        if (!student) return null;
+        return (
+          <SendSheet
+            title="Ödevi gönder"
+            student={student}
+            buildForStudent={() => MESSAGES.homework(send, student, false)}
+            buildForParent={() => MESSAGES.homework(send, student, true)}
+            onClose={() => setSend(null)}
+            toast={toast}
+          />
+        );
+      })()}
       {pendingDelete && (
         <Confirm
           text="Bu kayıt silinsin mi?"
@@ -2317,6 +2651,7 @@ function Stat({ icon: Icon, label, value, sub, tone = T.brand }) {
 function FinanceScreen({ data, update, toast, go }) {
   const [form, setForm] = useState(false);
   const [pendingDelete, setPendingDelete] = useState(null);
+  const [send, setSend] = useState(null); // { student, debt } — veliye ödeme mesajı
 
   const nameOf = (id) => data.students.find((s) => s.id === id)?.name || "Silinmiş öğrenci";
 
@@ -2431,6 +2766,19 @@ function FinanceScreen({ data, update, toast, go }) {
                 }}>
                   {money(debt)}
                 </span>
+                <button
+                  onClick={() => setSend({ student, debt })}
+                  aria-label="Veliye WhatsApp gönder"
+                  title="Veliye WhatsApp ile gönder"
+                  className="k-btn"
+                  style={{
+                    width: 34, height: 34, borderRadius: 10, cursor: "pointer",
+                    border: `1px solid ${T.line}`, background: T.surface,
+                    display: "grid", placeItems: "center", flexShrink: 0,
+                  }}
+                >
+                  <WhatsApp size={16} color="#25D366" />
+                </button>
                 <Button size="sm" variant="quiet" onClick={() => setForm(student.id)}>
                   Tahsil et
                 </Button>
@@ -2511,6 +2859,15 @@ function FinanceScreen({ data, update, toast, go }) {
             setForm(false);
             toast("Ödeme kaydedildi.");
           }}
+        />
+      )}
+      {send && (
+        <SendSheet
+          title="Ödeme hatırlatması"
+          student={send.student}
+          buildForParent={() => MESSAGES.payment(send.student, send.debt, data.lessons)}
+          onClose={() => setSend(null)}
+          toast={toast}
         />
       )}
       {pendingDelete && (
