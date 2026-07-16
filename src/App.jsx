@@ -303,6 +303,8 @@ const DAY_NAMES = ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cum
 const DAY_SHORT = ["Pzt", "Sal", "Çar", "Per", "Cum", "Cmt", "Paz"];
 const MONTHS = ["Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran", "Temmuz", "Ağustos", "Eylül", "Ekim", "Kasım", "Aralık"];
 const HOURS = Array.from({ length: 15 }, (_, i) => i + 8); // 08:00 – 22:00
+// yarım saatlik dilimler: "08:00", "08:30", "09:00" ...
+const SLOTS = HOURS.flatMap((h) => [`${String(h).padStart(2, "0")}:00`, `${String(h).padStart(2, "0")}:30`]);
 
 /* ═══════════════════════════════════════════════════════════════
    DATE HELPERS  — dersler gerçek tarihe bağlı, hafta gezinme çalışır
@@ -400,11 +402,13 @@ const TABLES = {
       id: l.id, student_id: l.studentId, date: l.date, time: l.time,
       duration: l.duration, fee: l.fee, status: l.status,
       topic: l.topic || "", note: l.note || "", attendance: l.attendance || "",
+      makeup: !!l.makeup,
     }),
     fromDb: (r) => ({
       id: r.id, studentId: r.student_id, date: r.date, time: r.time,
       duration: r.duration, fee: Number(r.fee) || 0, status: r.status,
       topic: r.topic || "", note: r.note || "", attendance: r.attendance || "",
+      makeup: !!r.makeup,
     }),
   },
   homework: {
@@ -1276,6 +1280,14 @@ function HistorySheet({ student, lessons, onClose, onEditTopic, onSendProgress }
                 }}>
                   {fmtDate(l.date)} · {span(l.time, l.duration)}
                 </span>
+                {l.makeup && (
+                  <span style={{
+                    fontSize: 9.5, fontWeight: 700, color: "#fff", background: "#4C6EF5",
+                    padding: "1px 6px", borderRadius: 5,
+                  }}>
+                    TELAFİ
+                  </span>
+                )}
                 <span style={{
                   fontSize: 10.5, fontWeight: 700, color: STATUS[l.status].fg,
                   background: STATUS[l.status].bg, padding: "2px 7px", borderRadius: 6,
@@ -1542,9 +1554,9 @@ const STATUS = {
 };
 const NEXT_STATUS = { planned: "done", done: "cancelled", cancelled: "planned" };
 
-function LessonForm({ students, lessons, date, hour, onSave, onClose }) {
+function LessonForm({ students, lessons, date, time: initialTime, onSave, onClose }) {
   const [studentId, setStudentId] = useState(students[0]?.id || "");
-  const [time, setTime] = useState(`${String(hour ?? 9).padStart(2, "0")}:00`);
+  const [time, setTime] = useState(initialTime || "09:00");
   const [repeats, setRepeats] = useState(false);
   const [weeks, setWeeks] = useState("8");
 
@@ -1553,6 +1565,7 @@ function LessonForm({ students, lessons, date, hour, onSave, onClose }) {
   const [duration, setDuration] = useState(student?.duration || "90 dk");
   const [fee, setFee] = useState("");        // boş = otomatik hesapla
   const [feeTouched, setFeeTouched] = useState(false);
+  const [makeup, setMakeup] = useState(false); // telafi dersi mi
 
   // öğrenci değişince süreyi onun varsayılanına al
   useEffect(() => {
@@ -1561,7 +1574,10 @@ function LessonForm({ students, lessons, date, hour, onSave, onClose }) {
 
   const rate = student?.fee || 0;
   const autoFee = Math.round(rate * unitsOf(duration));
-  const finalFee = feeTouched ? Math.max(0, Number(fee) || 0) : autoFee;
+  // otomatik fiyat sadece öğrencinin ders saati ücreti tanımlıysa gelir; yoksa boş kalır
+  const finalFee = feeTouched
+    ? Math.max(0, Number(fee) || 0)
+    : (rate > 0 ? autoFee : 0);
 
   // gerçek zaman aralığına göre çakışma
   const toMin = (t) => {
@@ -1656,13 +1672,20 @@ function LessonForm({ students, lessons, date, hour, onSave, onClose }) {
 
       <Field
         label="Tutar"
-        hint={feeTouched ? "Bu ders için elle girildi." : "Otomatik hesaplandı. Değiştirmek isterseniz yazın."}
+        hint={
+          feeTouched
+            ? "Bu ders için elle girildi."
+            : rate > 0
+              ? "Otomatik hesaplandı. Değiştirmek isterseniz yazın."
+              : "Öğrencinin ders saati ücreti tanımlı değil. Tutarı elle girin."
+        }
       >
         <TextInput
-          value={feeTouched ? fee : String(autoFee)}
+          value={feeTouched ? fee : (rate > 0 ? String(autoFee) : "")}
           onChange={(v) => { setFee(v); setFeeTouched(true); }}
           type="number"
           inputMode="numeric"
+          placeholder="0"
         />
       </Field>
 
@@ -1680,9 +1703,32 @@ function LessonForm({ students, lessons, date, hour, onSave, onClose }) {
         </div>
       )}
 
+      <label style={{
+        display: "flex", alignItems: "center", gap: 10, cursor: "pointer",
+        border: `1px solid ${makeup ? "#4C6EF5" : T.line}`,
+        background: makeup ? "#4C6EF510" : T.surface,
+        borderRadius: 12, padding: 13, marginBottom: 12,
+      }}>
+        <input
+          type="checkbox"
+          checked={makeup}
+          onChange={(e) => setMakeup(e.target.checked)}
+          style={{ width: 17, height: 17, accentColor: "#4C6EF5", cursor: "pointer" }}
+        />
+        <div>
+          <span style={{ fontSize: 14, fontWeight: 650, display: "block" }}>
+            Telafi dersi
+          </span>
+          <span style={{ fontSize: 12, color: T.ink60 }}>
+            Kaçırılan dersin yerine, farklı gün/saatte
+          </span>
+        </div>
+      </label>
+
       <div style={{
         border: `1px solid ${T.line}`, borderRadius: 12, padding: 13, marginBottom: 18,
         background: repeats ? T.brandSoft : T.surface,
+        opacity: makeup ? 0.5 : 1, pointerEvents: makeup ? "none" : "auto",
       }}>
         <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
           <input
@@ -1720,12 +1766,118 @@ function LessonForm({ students, lessons, date, hour, onSave, onClose }) {
             time,
             duration,
             fee: finalFee,
-            count: repeats ? Math.min(52, Math.max(2, Number(weeks) || 2)) : 1,
+            makeup,
+            count: makeup ? 1 : (repeats ? Math.min(52, Math.max(2, Number(weeks) || 2)) : 1),
           })
         }
       >
-        <Check size={17} /> {repeats ? `${weeks} ders ekle` : "Dersi ekle"}
+        <Check size={17} /> {makeup ? "Telafi dersi ekle" : repeats ? `${weeks} ders ekle` : "Dersi ekle"}
       </Button>
+    </Sheet>
+  );
+}
+
+/** Var olan bir dersi düzenle — gün, saat, süre, ücret, telafi */
+function EditLessonForm({ lesson, studentName, onSave, onDelete, onClose }) {
+  const [date, setDate] = useState(lesson.date);
+  const [time, setTime] = useState(lesson.time);
+  const [duration, setDuration] = useState(lesson.duration);
+  const [fee, setFee] = useState(String(lesson.fee ?? 0));
+  const [makeup, setMakeup] = useState(!!lesson.makeup);
+
+  return (
+    <Sheet title="Dersi düzenle" onClose={onClose}>
+      <p style={{ margin: "-6px 0 16px", fontSize: 13.5, color: T.ink60 }}>
+        {studentName}
+      </p>
+
+      <Field label="Gün">
+        <TextInput value={date} onChange={setDate} type="date" />
+      </Field>
+
+      <Field label="Başlangıç saati">
+        <TextInput value={time} onChange={setTime} type="time" />
+      </Field>
+
+      <Field label="Süre">
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
+          {DURATIONS.map((d) => {
+            const on = duration === d;
+            return (
+              <button
+                key={d}
+                type="button"
+                onClick={() => setDuration(d)}
+                className="k-btn"
+                style={{
+                  padding: "8px 13px", borderRadius: 9, cursor: "pointer",
+                  border: `1.5px solid ${on ? T.brand : T.line}`,
+                  background: on ? T.brandSoft : T.surface,
+                  color: on ? T.brandDeep : T.ink60,
+                  fontWeight: 600, fontSize: 13, fontFamily: "inherit",
+                }}
+              >
+                {durationLabel(d)}
+              </button>
+            );
+          })}
+        </div>
+      </Field>
+
+      <div style={{
+        background: T.brandSoft, borderRadius: 11, padding: "11px 13px", marginBottom: 16,
+        display: "flex", alignItems: "center", gap: 8,
+      }}>
+        <Clock size={15} color={T.brand} />
+        <span style={{ fontSize: 15, fontWeight: 750, color: T.brandDeep, fontVariantNumeric: "tabular-nums" }}>
+          {span(time, duration)}
+        </span>
+      </div>
+
+      <Field label="Tutar">
+        <TextInput value={fee} onChange={setFee} type="number" inputMode="numeric" placeholder="0" />
+      </Field>
+
+      <label style={{
+        display: "flex", alignItems: "center", gap: 10, cursor: "pointer",
+        border: `1px solid ${makeup ? "#4C6EF5" : T.line}`,
+        background: makeup ? "#4C6EF510" : T.surface,
+        borderRadius: 12, padding: 13, marginBottom: 18,
+      }}>
+        <input
+          type="checkbox"
+          checked={makeup}
+          onChange={(e) => setMakeup(e.target.checked)}
+          style={{ width: 17, height: 17, accentColor: "#4C6EF5", cursor: "pointer" }}
+        />
+        <span style={{ fontSize: 14, fontWeight: 650 }}>Telafi dersi</span>
+      </label>
+
+      <Button
+        full
+        onClick={() =>
+          onSave({
+            date, time, duration,
+            fee: Math.max(0, Number(fee) || 0),
+            makeup,
+          })
+        }
+      >
+        <Check size={17} /> Değişiklikleri kaydet
+      </Button>
+
+      <button
+        onClick={onDelete}
+        className="k-btn"
+        style={{
+          width: "100%", marginTop: 10, padding: "12px", borderRadius: 12,
+          border: "none", background: T.warnSoft, color: T.warn,
+          fontWeight: 600, fontSize: 14, cursor: "pointer", fontFamily: "inherit",
+          display: "flex", alignItems: "center", justifyContent: "center", gap: 7,
+        }}
+      >
+        <Trash2 size={15} /> Bu dersi sil
+      </button>
     </Sheet>
   );
 }
@@ -1735,10 +1887,11 @@ function CalendarScreen({ data, update, toast, go }) {
   const [anchor, setAnchor] = useState(today);   // görünen haftanın herhangi bir günü
   const [selected, setSelected] = useState(today);
   const [view, setView] = useState("day");
-  const [form, setForm] = useState(null);        // { date, hour }
+  const [form, setForm] = useState(null);        // { date, time }
   const [pendingDelete, setPendingDelete] = useState(null);
   const [topicOf, setTopicOf] = useState(null);  // konusu girilen ders
   const [send, setSend] = useState(null);        // devamsızlık bildirilecek ders
+  const [edit, setEdit] = useState(null);        // düzenlenecek ders
 
   const weekStart = useMemo(() => startOfWeek(anchor), [anchor]);
   const week = useMemo(() => Array.from({ length: 7 }, (_, i) => addDays(weekStart, i)), [weekStart]);
@@ -1752,7 +1905,7 @@ function CalendarScreen({ data, update, toast, go }) {
     [data.lessons]
   );
 
-  function addLessons({ studentId, time, duration, fee, count }) {
+  function addLessons({ studentId, time, duration, fee, makeup, count }) {
     const base = parseISO(form.date);
     const created = Array.from({ length: count }, (_, i) => ({
       id: crypto.randomUUID(),
@@ -1762,10 +1915,11 @@ function CalendarScreen({ data, update, toast, go }) {
       duration,
       fee,
       status: "planned",
+      makeup: !!makeup,
     }));
     update("lessons", (xs) => [...xs, ...created]);
     setForm(null);
-    toast(count > 1 ? `${count} ders eklendi.` : "Ders eklendi.");
+    toast(makeup ? "Telafi dersi eklendi." : count > 1 ? `${count} ders eklendi.` : "Ders eklendi.");
   }
 
   function cycleStatus(id) {
@@ -1895,25 +2049,31 @@ function CalendarScreen({ data, update, toast, go }) {
               Bu gün boş. Bir saate dokunup ders ekleyin.
             </p>
           )}
-          {HOURS.map((h) => {
-            const slot = dayLessons.filter((x) => Number(x.time.slice(0, 2)) === h);
+          {SLOTS.map((slotTime) => {
+            const slot = dayLessons.filter((x) => x.time === slotTime);
+            const isHour = slotTime.endsWith(":00");
             return (
-              <div key={h} style={{ display: "flex", borderTop: `1px solid ${T.line}`, minHeight: 54 }}>
+              <div key={slotTime} style={{
+                display: "flex",
+                borderTop: `1px solid ${isHour ? T.line : T.line + "80"}`,
+                minHeight: isHour ? 30 : 28,
+              }}>
                 <span style={{
-                  width: 42, flexShrink: 0, fontSize: 11, color: T.ink30, paddingTop: 6,
+                  width: 42, flexShrink: 0, fontSize: 10.5, paddingTop: 5,
+                  color: isHour ? T.ink30 : T.ink30 + "99",
                   fontVariantNumeric: "tabular-nums",
                 }}>
-                  {String(h).padStart(2, "0")}:00
+                  {slotTime}
                 </span>
-                <div style={{ flex: 1, padding: "5px 0 5px 6px", display: "grid", gap: 5 }}>
+                <div style={{ flex: 1, padding: "3px 0 3px 6px", display: "grid", gap: 5 }}>
                   {slot.length === 0 ? (
                     <button
-                      onClick={() => setForm({ date: iso(selected), hour: h })}
-                      aria-label={`${String(h).padStart(2, "0")}:00 için ders ekle`}
+                      onClick={() => setForm({ date: iso(selected), time: slotTime })}
+                      aria-label={`${slotTime} için ders ekle`}
                       className="k-slot"
                       style={{
-                        width: "100%", height: 42, background: "transparent", border: "none",
-                        borderRadius: 9, cursor: "pointer",
+                        width: "100%", minHeight: isHour ? 24 : 22, background: "transparent",
+                        border: "none", borderRadius: 9, cursor: "pointer",
                       }}
                     />
                   ) : (
@@ -1921,18 +2081,29 @@ function CalendarScreen({ data, update, toast, go }) {
                       <div
                         key={l.id}
                         style={{
-                          background: STATUS[l.status].bg, borderLeft: `3px solid ${STATUS[l.status].fg}`,
+                          background: l.makeup ? "#4C6EF510" : STATUS[l.status].bg,
+                          borderLeft: `3px solid ${l.makeup ? "#4C6EF5" : STATUS[l.status].fg}`,
                           borderRadius: "0 10px 10px 0", padding: "9px 10px",
                           display: "flex", alignItems: "center", gap: 8,
                         }}
                       >
                         <button
-                          onClick={() => cycleStatus(l.id)}
+                          onClick={() => setEdit(l)}
                           className="k-btn"
                           style={{ flex: 1, textAlign: "left", background: "none", border: "none", cursor: "pointer", padding: 0, fontFamily: "inherit" }}
-                          title="Durumu değiştirmek için dokunun"
+                          title="Düzenlemek için dokunun"
                         >
-                          <div style={{ fontWeight: 700, fontSize: 14, color: T.ink }}>{nameOf(l.studentId)}</div>
+                          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                            <span style={{ fontWeight: 700, fontSize: 14, color: T.ink }}>{nameOf(l.studentId)}</span>
+                            {l.makeup && (
+                              <span style={{
+                                fontSize: 9.5, fontWeight: 700, color: "#fff", background: "#4C6EF5",
+                                padding: "1px 6px", borderRadius: 5,
+                              }}>
+                                TELAFİ
+                              </span>
+                            )}
+                          </div>
                           <div style={{ fontSize: 12, color: T.ink60, marginTop: 2, fontVariantNumeric: "tabular-nums" }}>
                             {span(l.time, l.duration)} · {money(l.fee)}
                           </div>
@@ -1945,13 +2116,20 @@ function CalendarScreen({ data, update, toast, go }) {
                             </div>
                           )}
                         </button>
-                        <span style={{
-                          fontSize: 10.5, fontWeight: 700, color: STATUS[l.status].fg,
-                          border: `1px solid ${STATUS[l.status].fg}33`, padding: "3px 7px", borderRadius: 6,
-                          whiteSpace: "nowrap",
-                        }}>
+                        <button
+                          onClick={() => cycleStatus(l.id)}
+                          className="k-btn"
+                          aria-label="Durumu değiştir"
+                          title="Durumu değiştir"
+                          style={{
+                            background: "none", border: `1px solid ${STATUS[l.status].fg}33`,
+                            cursor: "pointer", padding: "3px 7px", borderRadius: 6,
+                            fontSize: 10.5, fontWeight: 700, color: STATUS[l.status].fg,
+                            whiteSpace: "nowrap", fontFamily: "inherit",
+                          }}
+                        >
                           {STATUS[l.status].label}
-                        </span>
+                        </button>
                         {l.status === "cancelled" && (
                           <button
                             onClick={() => setSend(l)}
@@ -2049,7 +2227,7 @@ function CalendarScreen({ data, update, toast, go }) {
                         </button>
                       ) : (
                         <button
-                          onClick={() => setForm({ date: iso(d), hour: h })}
+                          onClick={() => setForm({ date: iso(d), time: `${String(h).padStart(2, "0")}:00` })}
                           aria-label="Ders ekle"
                           className="k-slot"
                           style={{ width: "100%", height: "100%", minHeight: 38, background: "transparent", border: "none", borderRadius: 7, cursor: "pointer" }}
@@ -2065,7 +2243,7 @@ function CalendarScreen({ data, update, toast, go }) {
       )}
 
       <button
-        onClick={() => setForm({ date: iso(selected), hour: 9 })}
+        onClick={() => setForm({ date: iso(selected), time: "09:00" })}
         aria-label="Ders ekle"
         className="k-fab"
         style={{
@@ -2082,9 +2260,28 @@ function CalendarScreen({ data, update, toast, go }) {
           students={data.students}
           lessons={data.lessons}
           date={form.date}
-          hour={form.hour}
+          time={form.time}
           onSave={addLessons}
           onClose={() => setForm(null)}
+        />
+      )}
+      {edit && (
+        <EditLessonForm
+          lesson={edit}
+          studentName={nameOf(edit.studentId)}
+          onClose={() => setEdit(null)}
+          onSave={(fields) => {
+            update("lessons", (xs) =>
+              xs.map((l) => (l.id === edit.id ? { ...l, ...fields } : l))
+            );
+            setEdit(null);
+            toast("Ders güncellendi.");
+          }}
+          onDelete={() => {
+            update("lessons", (xs) => xs.filter((l) => l.id !== edit.id));
+            setEdit(null);
+            toast("Ders silindi.");
+          }}
         />
       )}
       {send && (() => {
