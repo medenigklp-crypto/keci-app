@@ -2050,7 +2050,16 @@ function CalendarScreen({ data, update, toast, go }) {
             </p>
           )}
           {SLOTS.map((slotTime) => {
-            const slot = dayLessons.filter((x) => x.time === slotTime);
+            const toMin = (t) => { const [h, m] = t.split(":").map(Number); return h * 60 + m; };
+            const slotStart = toMin(slotTime);
+            // bu dilimde BAŞLAYAN dersler
+            const starting = dayLessons.filter((x) => x.time === slotTime);
+            // bu dilimi KAPLAYAN (başka dilimde başlayıp buraya taşan) ders var mı
+            const covering = dayLessons.some((x) => {
+              const s = toMin(x.time);
+              const e = s + minutesOf(x.duration);
+              return s < slotStart && slotStart < e;
+            });
             const isHour = slotTime.endsWith(":00");
             return (
               <div key={slotTime} style={{
@@ -2066,25 +2075,35 @@ function CalendarScreen({ data, update, toast, go }) {
                   {slotTime}
                 </span>
                 <div style={{ flex: 1, padding: "3px 0 3px 6px", display: "grid", gap: 5 }}>
-                  {slot.length === 0 ? (
-                    <button
-                      onClick={() => setForm({ date: iso(selected), time: slotTime })}
-                      aria-label={`${slotTime} için ders ekle`}
-                      className="k-slot"
-                      style={{
-                        width: "100%", minHeight: isHour ? 24 : 22, background: "transparent",
-                        border: "none", borderRadius: 9, cursor: "pointer",
-                      }}
-                    />
+                  {starting.length === 0 ? (
+                    covering ? (
+                      // üstteki ders buraya taşıyor — boş ama tıklanamaz
+                      <div style={{ minHeight: isHour ? 24 : 22 }} />
+                    ) : (
+                      <button
+                        onClick={() => setForm({ date: iso(selected), time: slotTime })}
+                        aria-label={`${slotTime} için ders ekle`}
+                        className="k-slot"
+                        style={{
+                          width: "100%", minHeight: isHour ? 24 : 22, background: "transparent",
+                          border: "none", borderRadius: 9, cursor: "pointer",
+                        }}
+                      />
+                    )
                   ) : (
-                    slot.map((l) => (
+                    starting.map((l) => {
+                      // ders kaç dilim kaplıyor → yüksekliği ona göre uzat
+                      const slots = Math.max(1, Math.round(minutesOf(l.duration) / 30));
+                      const height = slots * 28 + (slots - 1) * 5;
+                      return (
                       <div
                         key={l.id}
                         style={{
                           background: l.makeup ? "#4C6EF510" : STATUS[l.status].bg,
                           borderLeft: `3px solid ${l.makeup ? "#4C6EF5" : STATUS[l.status].fg}`,
                           borderRadius: "0 10px 10px 0", padding: "9px 10px",
-                          display: "flex", alignItems: "center", gap: 8,
+                          display: "flex", alignItems: "flex-start", gap: 8,
+                          minHeight: height,
                         }}
                       >
                         <button
@@ -2125,7 +2144,7 @@ function CalendarScreen({ data, update, toast, go }) {
                             background: "none", border: `1px solid ${STATUS[l.status].fg}33`,
                             cursor: "pointer", padding: "3px 7px", borderRadius: 6,
                             fontSize: 10.5, fontWeight: 700, color: STATUS[l.status].fg,
-                            whiteSpace: "nowrap", fontFamily: "inherit",
+                            whiteSpace: "nowrap", fontFamily: "inherit", flexShrink: 0,
                           }}
                         >
                           {STATUS[l.status].label}
@@ -2136,7 +2155,7 @@ function CalendarScreen({ data, update, toast, go }) {
                             aria-label="Devamsızlığı bildir"
                             title="Devamsızlığı WhatsApp ile bildir"
                             className="k-btn"
-                            style={{ background: "none", border: "none", cursor: "pointer", padding: 2, display: "grid", placeItems: "center" }}
+                            style={{ background: "none", border: "none", cursor: "pointer", padding: 2, display: "grid", placeItems: "center", flexShrink: 0 }}
                           >
                             <WhatsApp size={16} color="#25D366" />
                           </button>
@@ -2145,20 +2164,21 @@ function CalendarScreen({ data, update, toast, go }) {
                           onClick={() => setPendingDelete(l)}
                           aria-label="Dersi sil"
                           className="k-btn"
-                          style={{ background: "none", border: "none", cursor: "pointer", padding: 2, display: "grid", placeItems: "center" }}
+                          style={{ background: "none", border: "none", cursor: "pointer", padding: 2, display: "grid", placeItems: "center", flexShrink: 0 }}
                         >
                           <Trash2 size={14} color={T.ink30} />
                         </button>
                       </div>
-                    ))
+                      );
+                    })
                   )}
-                  {slot.length > 1 && (
+                  {starting.length > 1 && (
                     <div style={{
                       display: "flex", alignItems: "center", gap: 5,
                       fontSize: 11.5, color: T.warn, fontWeight: 600, paddingLeft: 3,
                     }}>
                       <AlertCircle size={12} color={T.warn} />
-                      Bu saatte {slot.length} ders çakışıyor
+                      Bu saatte {starting.length} ders çakışıyor
                     </div>
                   )}
                 </div>
